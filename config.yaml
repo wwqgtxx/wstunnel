@@ -1,0 +1,19 @@
+server:
+  -
+    bind-address: 0.0.0.0:8080
+    target:
+      -
+        target-address: 127.0.0.1:80
+        ws-path: /
+      -
+        target-address: 127.0.0.1:81
+        ws-path: /ws
+client:
+  -
+    bind-address: 0.0.0.0:10000
+    ws-url: ws://127.0.0.1:81/ws
+    ws-headers:
+      Host: www.abc.com
+    skip-cert-verify: true
+    servername: www.abc.com
+
