@@ -31,32 +31,8 @@ func (s *Server) handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer tcp.Close()
-	go func() {
-		buf := make([]byte, 1024)
-		for {
-			len, err := tcp.Read(buf)
-			if err != nil {
-				log.Println(err)
-				conn.Close()
-				tcp.Close()
-				break
-			}
-			conn.WriteMessage(websocket.BinaryMessage, buf[0:len])
-		}
-	}()
-	for {
-		msgType, buf, err := conn.ReadMessage()
-		if err != nil {
-			log.Println(err)
-			conn.Close()
-			tcp.Close()
-			break
-		}
-		if msgType != websocket.BinaryMessage {
-			log.Println("unknown msgType")
-		}
-		tcp.Write(buf)
-	}
+
+	Tunnel(tcp, conn)
 }
 
 func server(config ServerConfig) {

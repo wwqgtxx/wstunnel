@@ -26,7 +26,7 @@ func client(config ClientConfig) {
 	}
 	listener, err := net.Listen("tcp", config.BindAddress)
 	if err != nil {
-		panic(err)
+		log.Println(err)
 	}
 	for {
 		tcp, err := listener.Accept()
@@ -35,7 +35,6 @@ func client(config ClientConfig) {
 			return
 		}
 		go func() {
-
 			defer tcp.Close()
 			ws, _, err := dialer.Dial(config.WSUrl, header)
 			if err != nil {
@@ -43,34 +42,8 @@ func client(config ClientConfig) {
 				return
 			}
 			defer ws.Close()
-			go func() {
-				buf := make([]byte, 1024)
-				for {
-					len, err := tcp.Read(buf)
-					if err != nil {
-						log.Println(err)
-						tcp.Close()
-						ws.Close()
-						break
-					}
-					//log.Printf("C→S %d", len)
-					ws.WriteMessage(websocket.BinaryMessage, buf[0:len])
-				}
-			}()
-			for {
-				msgType, buf, err := ws.ReadMessage()
-				if err != nil {
-					log.Println(err)
-					tcp.Close()
-					ws.Close()
-					break
-				}
-				if msgType != websocket.BinaryMessage {
-					log.Println("unknown msgType")
-				}
-				//log.Printf("S→C %d", len(buf))
-				tcp.Write(buf)
-			}
+
+			Tunnel(tcp, ws)
 		}()
 	}
 }
