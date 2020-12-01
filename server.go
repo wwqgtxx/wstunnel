@@ -46,5 +46,5 @@ func server(config ServerConfig) {
 		}
 		mux.HandleFunc(target.WSPath, s.handler)
 	}
-	log.Fatal(http.ListenAndServe(config.BindAddress, mux))
+	log.Print(http.ListenAndServe(config.BindAddress, mux))
 }

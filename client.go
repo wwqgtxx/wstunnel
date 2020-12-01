@@ -32,7 +32,8 @@ func client(config ClientConfig) {
 		tcp, err := listener.Accept()
 		if err != nil {
 			log.Println(err)
-			return
+			<-time.After(3 * time.Second)
+			continue
 		}
 		go func() {
 			defer tcp.Close()

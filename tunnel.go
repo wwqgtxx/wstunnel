@@ -41,6 +41,7 @@ func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 				log.Println("unknown msgType")
 			}
 		}
+		// _, err := io.CopyBuffer(tcp,reader,buf)
 		nBytes, err := reader.Read(buf)
 		if err == io.EOF {
 			reader = nil
