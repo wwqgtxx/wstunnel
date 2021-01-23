@@ -9,6 +9,7 @@ import (
 
 type ClientConfig struct {
 	BindAddress    string            `yaml:"bind-address"`
+	TargetAddress  string            `yaml:"target-address"`
 	WSUrl          string            `yaml:"ws-url"`
 	WSHeaders      map[string]string `yaml:"ws-headers"`
 	SkipCertVerify bool              `yaml:"skip-cert-verify"`

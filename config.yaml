@@ -23,4 +23,7 @@ client:
       Host: www.abc.com
     skip-cert-verify: true
     servername: www.abc.com
+  -
+    bind-address: 0.0.0.0:20000
+    target-address: 127.0.0.1:10000
 

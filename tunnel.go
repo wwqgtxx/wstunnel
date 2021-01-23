@@ -59,7 +59,7 @@ func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 	return
 }
 
-func Tunnel(tcp net.Conn, ws *websocket.Conn) {
+func TunnelTcpWs(tcp net.Conn, ws *websocket.Conn) {
 	exit := make(chan int, 2)
 
 	go func() {
@@ -72,6 +72,27 @@ func Tunnel(tcp net.Conn, ws *websocket.Conn) {
 
 	go func() {
 		err := WsToTcp(ws, tcp)
+		if err != nil && err == io.EOF {
+			log.Println(err)
+		}
+		exit <- 1
+	}()
+	<-exit
+}
+
+func TunnelTcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
+	exit := make(chan int, 2)
+
+	go func() {
+		_, err := io.Copy(tcp1, tcp2)
+		if err != nil && err == io.EOF {
+			log.Println(err)
+		}
+		exit <- 1
+	}()
+
+	go func() {
+		_, err := io.Copy(tcp2, tcp1)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}

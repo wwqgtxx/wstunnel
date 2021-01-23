@@ -32,7 +32,7 @@ func (s *Server) handler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer tcp.Close()
 
-	Tunnel(tcp, conn)
+	TunnelTcpWs(tcp, conn)
 }
 
 func server(config ServerConfig) {

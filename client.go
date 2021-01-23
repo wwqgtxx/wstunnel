@@ -10,23 +10,26 @@ import (
 )
 
 func client(config ClientConfig) {
+	listener, err := net.Listen("tcp", config.BindAddress)
+	if err != nil {
+		log.Println(err)
+	}
 	header := http.Header{}
 	if len(config.WSHeaders) != 0 {
 		for key, value := range config.WSHeaders {
 			header.Add(key, value)
 		}
 	}
-	dialer := &websocket.Dialer{
+	wsDialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: 45 * time.Second,
 	}
-	dialer.TLSClientConfig = &tls.Config{
+	wsDialer.TLSClientConfig = &tls.Config{
 		ServerName:         config.ServerName,
 		InsecureSkipVerify: config.SkipCertVerify,
 	}
-	listener, err := net.Listen("tcp", config.BindAddress)
-	if err != nil {
-		log.Println(err)
+	tcpDialer := net.Dialer{
+		Timeout: 45 * time.Second,
 	}
 	for {
 		tcp, err := listener.Accept()
@@ -37,14 +40,27 @@ func client(config ClientConfig) {
 		}
 		go func() {
 			defer tcp.Close()
-			ws, _, err := dialer.Dial(config.WSUrl, header)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-			defer ws.Close()
+			if len(config.TargetAddress) > 0 {
+				conn, err := tcpDialer.Dial("tcp", config.TargetAddress)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				defer conn.Close()
 
-			Tunnel(tcp, ws)
+				TunnelTcpTcp(tcp, conn)
+
+			} else {
+				ws, _, err := wsDialer.Dial(config.WSUrl, header)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				defer ws.Close()
+
+				TunnelTcpWs(tcp, ws)
+			}
+
 		}()
 	}
 }
