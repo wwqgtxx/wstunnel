@@ -23,6 +23,9 @@ func client(config ClientConfig) {
 	wsDialer := &websocket.Dialer{
 		Proxy:            http.ProxyFromEnvironment,
 		HandshakeTimeout: 45 * time.Second,
+		ReadBufferSize:   BufSize,
+		WriteBufferSize:  BufSize,
+		WriteBufferPool:  WriteBufferPool,
 	}
 	wsDialer.TLSClientConfig = &tls.Config{
 		ServerName:         config.ServerName,

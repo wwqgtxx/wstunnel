@@ -5,14 +5,20 @@ import (
 	"io"
 	"log"
 	"net"
+	"sync"
 )
 
 const (
 	BufSize = 1024
 )
 
+var (
+	BufPool         = sync.Pool{New: func() interface{} { return make([]byte, BufSize) }}
+	WriteBufferPool = &sync.Pool{}
+)
+
 func TcpToWs(tcp net.Conn, ws *websocket.Conn) (err error) {
-	buf := make([]byte, BufSize)
+	buf := BufPool.Get().([]byte)
 	for {
 		nBytes, err := tcp.Read(buf)
 		if err != nil {
@@ -23,13 +29,14 @@ func TcpToWs(tcp net.Conn, ws *websocket.Conn) (err error) {
 			break
 		}
 	}
+	BufPool.Put(buf)
 	return
 }
 
 func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 	var reader io.Reader
 
-	buf := make([]byte, BufSize)
+	buf := BufPool.Get().([]byte)
 	for {
 		if reader == nil {
 			var msgType int
@@ -56,6 +63,7 @@ func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 			break
 		}
 	}
+	BufPool.Put(buf)
 	return
 }
 
