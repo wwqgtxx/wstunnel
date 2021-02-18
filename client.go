@@ -20,18 +20,18 @@ type Client interface {
 }
 
 type wsClient struct {
-	config   ClientConfig
 	header   http.Header
+	wsUrl    string
 	wsDialer *websocket.Dialer
 }
 
 type tcpClient struct {
-	config    ClientConfig
-	tcpDialer *net.Dialer
+	targetAddress string
+	tcpDialer     *net.Dialer
 }
 
 func (c *wsClient) Target() string {
-	return c.config.WSUrl
+	return c.wsUrl
 }
 
 func (c *wsClient) Dial() (io.Closer, error) {
@@ -46,7 +46,7 @@ func (c *wsClient) ToRawConn(conn io.Closer) net.Conn {
 
 func (c *wsClient) Handle(tcp net.Conn) {
 	defer tcp.Close()
-	log.Println("[Client]Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
+	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
 	conn, err := c.Dial()
 	if err != nil {
 		log.Println(err)
@@ -57,7 +57,7 @@ func (c *wsClient) Handle(tcp net.Conn) {
 }
 
 func (c *tcpClient) Target() string {
-	return c.config.TargetAddress
+	return c.targetAddress
 }
 
 func (c *tcpClient) Dial() (io.Closer, error) {
@@ -70,7 +70,7 @@ func (c *tcpClient) ToRawConn(conn io.Closer) net.Conn {
 
 func (c *tcpClient) Handle(tcp net.Conn) {
 	defer tcp.Close()
-	log.Println("[Client]Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
+	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
 	conn, err := c.Dial()
 	if err != nil {
 		log.Println(err)
@@ -87,9 +87,24 @@ func StartClient(config ClientConfig) {
 			Timeout: 45 * time.Second,
 		}
 		client = &tcpClient{
-			config:    config,
-			tcpDialer: tcpDialer,
+			targetAddress: config.TargetAddress,
+			tcpDialer:     tcpDialer,
 		}
+
+		host, port, err := net.SplitHostPort(config.TargetAddress)
+		if err != nil {
+			log.Println(err)
+		}
+		_client, ok := PortToClient[port]
+		if ok && (host == "127.0.0.1" || host == "localhost") {
+			log.Println("Short circuit replace (",
+				config.BindAddress, "<->", client.Target(),
+				") to (",
+				config.BindAddress, "<->", _client.Target(),
+				")")
+			client = _client
+		}
+
 	} else {
 		header := http.Header{}
 		if len(config.WSHeaders) != 0 {
@@ -109,8 +124,8 @@ func StartClient(config ClientConfig) {
 			InsecureSkipVerify: config.SkipCertVerify,
 		}
 		client = &wsClient{
-			config:   config,
 			header:   header,
+			wsUrl:    config.WSUrl,
 			wsDialer: wsDialer,
 		}
 	}

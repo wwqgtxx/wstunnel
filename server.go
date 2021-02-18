@@ -14,16 +14,12 @@ var upgrader = websocket.Upgrader{
 	WriteBufferPool: WriteBufferPool,
 }
 
-type Server interface {
-	Handler(w http.ResponseWriter, r *http.Request)
-}
-
-type normalServer struct {
+type normalServerHandler struct {
 	DestAddress string
 }
 
-func (s *normalServer) Handler(w http.ResponseWriter, r *http.Request) {
-	log.Println("[Server]Incoming --> ", r.RemoteAddr, r.Header, s.DestAddress)
+func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Println("Incoming --> ", r.RemoteAddr, r.Header, s.DestAddress)
 
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -42,13 +38,13 @@ func (s *normalServer) Handler(w http.ResponseWriter, r *http.Request) {
 	TunnelTcpWs(tcp, ws)
 }
 
-type internalServer struct {
+type internalServerHandler struct {
 	DestAddress string
 	Client      Client
 }
 
-func (s *internalServer) Handler(w http.ResponseWriter, r *http.Request) {
-	log.Println("[Server]Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, ") --> ", s.Client.Target())
+func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, ") --> ", s.Client.Target())
 
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -79,20 +75,25 @@ func StartServer(config ServerConfig) {
 		if err != nil {
 			log.Println(err)
 		}
-		var s Server
+		var sh http.Handler
 		client, ok := PortToClient[port]
 		if ok && (host == "127.0.0.1" || host == "localhost") {
-			s = &internalServer{
+			log.Println("Short circuit replace (",
+				target.WSPath, "<->", target.TargetAddress,
+				") to (",
+				target.WSPath, "<->", client.Target(),
+				")")
+			sh = &internalServerHandler{
 				DestAddress: target.TargetAddress,
 				Client:      client,
 			}
 		} else {
-			s = &normalServer{
+			sh = &normalServerHandler{
 				DestAddress: target.TargetAddress,
 			}
 
 		}
-		mux.HandleFunc(target.WSPath, s.Handler)
+		mux.Handle(target.WSPath, sh)
 	}
 	go log.Print(http.ListenAndServe(config.BindAddress, mux))
 }

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"log"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -8,6 +9,7 @@ import (
 )
 
 func main() {
+	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	configFile := "config.yaml"
 	if len(os.Args) == 2 {
 		configFile = os.Args[1]
