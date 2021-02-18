@@ -24,11 +24,11 @@ func main() {
 	if err != nil {
 		panic(err)
 	}
-	for _, serverConfig := range cfg.ServerConfigs {
-		go server(serverConfig)
-	}
 	for _, clientConfig := range cfg.ClientConfigs {
-		go client(clientConfig)
+		StartClient(clientConfig)
+	}
+	for _, serverConfig := range cfg.ServerConfigs {
+		StartServer(serverConfig)
 	}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
