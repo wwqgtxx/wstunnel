@@ -17,13 +17,6 @@ jobs:
     - run: go get github.com/mitchellh/gox
     - uses: actions/checkout@v2
     - run: PATH=$HOME/go/bin:$PATH ./crossbuild.sh
-    - uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ steps.get_version.outputs.VERSION }}
-        draft: true
     - uses: svenstaro/upload-release-action@1.1.0
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
