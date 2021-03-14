@@ -90,7 +90,7 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	defer ws.Close()
 	source := ws.UnderlyingConn()
 
-	ws2, err := s.Client.Dial()
+	ws2, err := s.Client.Dial(r.Header)
 	if err != nil {
 		log.Println(err)
 		return

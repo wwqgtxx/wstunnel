@@ -72,7 +72,7 @@ func (c *client) SetClientImpl(impl ClientImpl) {
 
 type ClientImpl interface {
 	Target() string
-	Dial() (io.Closer, error)
+	Dial(args ...interface{}) (io.Closer, error)
 	ToRawConn(conn io.Closer) net.Conn
 	Tunnel(tcp net.Conn, conn io.Closer)
 }
@@ -92,8 +92,17 @@ func (c *wsClientImpl) Target() string {
 	return c.wsUrl
 }
 
-func (c *wsClientImpl) Dial() (io.Closer, error) {
-	ws, _, err := c.wsDialer.Dial(c.Target(), c.header)
+func (c *wsClientImpl) Dial(args ...interface{}) (io.Closer, error) {
+	header := c.header
+	if len(args) >= 1 {
+		if inHeader, ok := args[0].(http.Header); ok {
+			if secProtocol, ok := inHeader["Sec-WebSocket-Protocol"]; ok && len(secProtocol) > 0 {
+				header = header.Clone()
+				header["Sec-WebSocket-Protocol"] = secProtocol
+			}
+		}
+	}
+	ws, _, err := c.wsDialer.Dial(c.Target(), header)
 	return ws, err
 }
 
@@ -110,7 +119,7 @@ func (c *tcpClientImpl) Target() string {
 	return c.targetAddress
 }
 
-func (c *tcpClientImpl) Dial() (io.Closer, error) {
+func (c *tcpClientImpl) Dial(args ...interface{}) (io.Closer, error) {
 	return c.tcpDialer.Dial("tcp", c.Target())
 }
 
