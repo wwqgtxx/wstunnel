@@ -96,12 +96,13 @@ func (c *wsClientImpl) Dial(args ...interface{}) (io.Closer, error) {
 	header := c.header
 	if len(args) >= 1 {
 		if inHeader, ok := args[0].(http.Header); ok {
-			if secProtocol, ok := inHeader["Sec-WebSocket-Protocol"]; ok && len(secProtocol) > 0 {
+			if secProtocol := inHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
 				header = header.Clone()
-				header["Sec-WebSocket-Protocol"] = secProtocol
+				header.Set("Sec-WebSocket-Protocol", secProtocol)
 			}
 		}
 	}
+	log.Println("Dial to", c.Target(), "with", header)
 	ws, _, err := c.wsDialer.Dial(c.Target(), header)
 	return ws, err
 }
