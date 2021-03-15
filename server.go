@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -48,6 +49,22 @@ func (s *server) CloneWithNewAddress(bindAddress string) Server {
 	}
 }
 
+func isWsUpgrade(header http.Header) bool {
+	if v := header.Get("Connection"); len(v) == 0 {
+		return false
+	}
+	if v := header.Get("Upgrade"); len(v) == 0 {
+		return false
+	}
+	if v := header.Get("Sec-Websocket-Version"); len(v) == 0 {
+		return false
+	}
+	if v := header.Get("Sec-Websocket-Key"); len(v) == 0 {
+		return false
+	}
+	return true
+}
+
 type ServerHandler http.Handler
 
 type normalServerHandler struct {
@@ -57,6 +74,26 @@ type normalServerHandler struct {
 func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println("Incoming --> ", r.RemoteAddr, r.Header, s.DestAddress)
 
+	ch := make(chan net.Conn)
+	defer func() {
+		if i, ok := <-ch; ok {
+			i.Close()
+		}
+	}()
+
+	go func() {
+		defer close(ch)
+		if !isWsUpgrade(r.Header) {
+			return
+		}
+		tcp, err := net.Dial("tcp", s.DestAddress)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		ch <- tcp
+	}()
+
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
@@ -64,9 +101,8 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	}
 	defer ws.Close()
 
-	tcp, err := net.Dial("tcp", s.DestAddress)
-	if err != nil {
-		log.Println(err)
+	tcp, ok := <-ch
+	if !ok {
 		return
 	}
 	defer tcp.Close()
@@ -82,6 +118,26 @@ type internalServerHandler struct {
 func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, ") --> ", s.Client.Target())
 
+	ch := make(chan io.Closer)
+	defer func() {
+		if i, ok := <-ch; ok {
+			i.Close()
+		}
+	}()
+
+	go func() {
+		defer close(ch)
+		if !isWsUpgrade(r.Header) {
+			return
+		}
+		ws2, err := s.Client.Dial(r.Header)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		ch <- ws2
+	}()
+
 	ws, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Println(err)
@@ -90,9 +146,8 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	defer ws.Close()
 	source := ws.UnderlyingConn()
 
-	ws2, err := s.Client.Dial(r.Header)
-	if err != nil {
-		log.Println(err)
+	ws2, ok := <-ch
+	if !ok {
 		return
 	}
 	defer ws2.Close()
