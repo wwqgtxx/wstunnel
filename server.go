@@ -1,12 +1,12 @@
 package main
 
 import (
+	"encoding/base64"
+	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net"
 	"net/http"
-
-	"github.com/gorilla/websocket"
 )
 
 var PortToServer = make(map[string]Server)
@@ -77,7 +77,7 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 	ch := make(chan net.Conn)
 	defer func() {
 		if i, ok := <-ch; ok {
-			i.Close()
+			_ = i.Close()
 		}
 	}()
 
@@ -90,6 +90,16 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		if err != nil {
 			log.Println(err)
 			return
+		}
+		// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
+		if secProtocol := r.Header.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
+			if buf, err := base64.StdEncoding.DecodeString(secProtocol); err == nil { // sure could base64 decode
+				_, err = tcp.Write(buf)
+				if err != nil {
+					log.Println(err)
+					return
+				}
+			}
 		}
 		ch <- tcp
 	}()
@@ -121,7 +131,7 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	ch := make(chan io.Closer)
 	defer func() {
 		if i, ok := <-ch; ok {
-			i.Close()
+			_ = i.Close()
 		}
 	}()
 
@@ -130,6 +140,7 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		if !isWsUpgrade(r.Header) {
 			return
 		}
+		// send inHeader to client for Xray's 0rtt ws
 		ws2, err := s.Client.Dial(r.Header)
 		if err != nil {
 			log.Println(err)
