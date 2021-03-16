@@ -96,8 +96,26 @@ func (c *wsClientImpl) Dial(args ...interface{}) (io.Closer, error) {
 	header := c.header
 	if len(args) >= 1 {
 		if inHeader, ok := args[0].(http.Header); ok {
+			// copy from inHeader
+			header = inHeader.Clone()
+			// don't use inHeader's `Host`
+			header.Del("Host")
+
+			// merge from c.header
+			for k, vs := range c.header {
+				header[k] = vs
+			}
+
+			// duplicate header is not allowed, remove
+			header.Del("Upgrade")
+			header.Del("Connection")
+			header.Del("Sec-Websocket-Key")
+			header.Del("Sec-Websocket-Version")
+			header.Del("Sec-Websocket-Extensions")
+			header.Del("Sec-WebSocket-Protocol")
+
+			// force use inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
 			if secProtocol := inHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-				header = header.Clone()
 				header.Set("Sec-WebSocket-Protocol", secProtocol)
 			}
 		}
