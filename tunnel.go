@@ -6,6 +6,7 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 )
 
 const (
@@ -68,6 +69,9 @@ func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 }
 
 func TunnelTcpWs(tcp net.Conn, ws *websocket.Conn) {
+	setKeepAlive(tcp)
+	setKeepAlive(ws.UnderlyingConn())
+
 	exit := make(chan int, 2)
 
 	go func() {
@@ -89,6 +93,9 @@ func TunnelTcpWs(tcp net.Conn, ws *websocket.Conn) {
 }
 
 func TunnelTcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
+	setKeepAlive(tcp1)
+	setKeepAlive(tcp2)
+
 	exit := make(chan int, 2)
 
 	go func() {
@@ -107,4 +114,11 @@ func TunnelTcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 		exit <- 1
 	}()
 	<-exit
+}
+
+func setKeepAlive(c net.Conn) {
+	if tcp, ok := c.(*net.TCPConn); ok {
+		_ = tcp.SetKeepAlive(true)
+		_ = tcp.SetKeepAlivePeriod(30 * time.Second)
+	}
 }
