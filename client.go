@@ -2,11 +2,14 @@ package main
 
 import (
 	"crypto/tls"
+	"encoding/base64"
 	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,7 +19,6 @@ var PortToClient = make(map[string]Client)
 type Client interface {
 	ClientImpl
 	Start()
-	Handle(tcp net.Conn)
 	Addr() string
 	GetClientImpl() ClientImpl
 	SetClientImpl(impl ClientImpl)
@@ -47,18 +49,6 @@ func (c *client) Start() {
 	}()
 }
 
-func (c *client) Handle(tcp net.Conn) {
-	defer tcp.Close()
-	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
-	conn, err := c.Dial()
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	defer conn.Close()
-	c.Tunnel(tcp, conn)
-}
-
 func (c *client) Addr() string {
 	return c.bindAddress
 }
@@ -72,6 +62,7 @@ func (c *client) SetClientImpl(impl ClientImpl) {
 
 type ClientImpl interface {
 	Target() string
+	Handle(tcp net.Conn)
 	Dial(args ...interface{}) (io.Closer, error)
 	ToRawConn(conn io.Closer) net.Conn
 	Tunnel(tcp net.Conn, conn io.Closer)
@@ -81,6 +72,7 @@ type wsClientImpl struct {
 	header   http.Header
 	wsUrl    string
 	wsDialer *websocket.Dialer
+	ed       uint32
 }
 
 type tcpClientImpl struct {
@@ -92,10 +84,35 @@ func (c *wsClientImpl) Target() string {
 	return c.wsUrl
 }
 
+func (c *wsClientImpl) Handle(tcp net.Conn) {
+	defer tcp.Close()
+	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
+	header := http.Header{}
+	// Xray's 0rtt ws
+	if c.ed > 0 {
+		buf := make([]byte, c.ed)
+		n, err := tcp.Read(buf)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		buf = buf[:n]
+
+		header.Set("Sec-WebSocket-Protocol", base64.StdEncoding.EncodeToString(buf))
+	}
+	conn, err := c.Dial(header)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer conn.Close()
+	c.Tunnel(tcp, conn)
+}
+
 func (c *wsClientImpl) Dial(args ...interface{}) (io.Closer, error) {
 	header := c.header
 	if len(args) >= 1 {
-		if inHeader, ok := args[0].(http.Header); ok {
+		if inHeader, ok := args[0].(http.Header); ok && len(inHeader) > 0 {
 			// copy from inHeader
 			header = inHeader.Clone()
 			// don't use inHeader's `Host`
@@ -136,6 +153,18 @@ func (c *wsClientImpl) Tunnel(tcp net.Conn, conn io.Closer) {
 
 func (c *tcpClientImpl) Target() string {
 	return c.targetAddress
+}
+
+func (c *tcpClientImpl) Handle(tcp net.Conn) {
+	defer tcp.Close()
+	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
+	conn, err := c.Dial()
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	defer conn.Close()
+	c.Tunnel(tcp, conn)
 }
 
 func (c *tcpClientImpl) Dial(args ...interface{}) (io.Closer, error) {
@@ -181,11 +210,22 @@ func BuildClient(config ClientConfig) {
 			ServerName:         config.ServerName,
 			InsecureSkipVerify: config.SkipCertVerify,
 		}
+		var ed uint32
+		if u, err := url.Parse(config.WSUrl); err == nil {
+			if q := u.Query(); q.Get("ed") != "" {
+				Ed, _ := strconv.Atoi(q.Get("ed"))
+				ed = uint32(Ed)
+				q.Del("ed")
+				u.RawQuery = q.Encode()
+				config.WSUrl = u.String()
+			}
+		}
 		c = &client{
 			ClientImpl: &wsClientImpl{
 				header:   header,
 				wsUrl:    config.WSUrl,
 				wsDialer: wsDialer,
+				ed:       ed,
 			},
 			bindAddress: config.BindAddress,
 		}
