@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"strings"
 )
 
 var PortToServer = make(map[string]Server)
@@ -65,6 +66,12 @@ func isWsUpgrade(header http.Header) bool {
 	return true
 }
 
+var replacer = strings.NewReplacer("+", "-", "/", "_", "=", "")
+
+func decodeEd(s string) ([]byte, error) {
+	return base64.RawURLEncoding.DecodeString(replacer.Replace(s))
+}
+
 type ServerHandler http.Handler
 
 type normalServerHandler struct {
@@ -81,6 +88,16 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}()
 
+	var edBuf []byte
+	responseHeader := http.Header{}
+	// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
+	if secProtocol := r.Header.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
+		if buf, err := decodeEd(secProtocol); err == nil { // sure could base64 decode
+			edBuf = buf
+			responseHeader.Set("Sec-WebSocket-Protocol", secProtocol)
+		}
+	}
+
 	go func() {
 		defer close(ch)
 		if !isWsUpgrade(r.Header) {
@@ -91,20 +108,18 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 			log.Println(err)
 			return
 		}
-		// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
-		if secProtocol := r.Header.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-			if buf, err := base64.StdEncoding.DecodeString(secProtocol); err == nil { // sure could base64 decode
-				_, err = tcp.Write(buf)
-				if err != nil {
-					log.Println(err)
-					return
-				}
+
+		if len(edBuf) > 0 {
+			_, err = tcp.Write(edBuf)
+			if err != nil {
+				log.Println(err)
+				return
 			}
 		}
 		ch <- tcp
 	}()
 
-	ws, err := upgrader.Upgrade(w, r, nil)
+	ws, err := upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		log.Println(err)
 		return
@@ -135,6 +150,14 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 	}()
 
+	responseHeader := http.Header{}
+	// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
+	if secProtocol := r.Header.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
+		if _, err := decodeEd(secProtocol); err == nil { // sure could base64 decode
+			responseHeader.Set("Sec-WebSocket-Protocol", secProtocol)
+		}
+	}
+
 	go func() {
 		defer close(ch)
 		if !isWsUpgrade(r.Header) {
@@ -149,7 +172,7 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		ch <- ws2
 	}()
 
-	ws, err := upgrader.Upgrade(w, r, nil)
+	ws, err := upgrader.Upgrade(w, r, responseHeader)
 	if err != nil {
 		log.Println(err)
 		return
