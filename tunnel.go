@@ -45,7 +45,7 @@ func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 			if err != nil {
 				break
 			}
-			if msgType != websocket.BinaryMessage {
+			if msgType != websocket.BinaryMessage && msgType != websocket.TextMessage {
 				log.Println("unknown msgType")
 			}
 		}

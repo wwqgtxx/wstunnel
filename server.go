@@ -50,22 +50,6 @@ func (s *server) CloneWithNewAddress(bindAddress string) Server {
 	}
 }
 
-func isWsUpgrade(header http.Header) bool {
-	if v := header.Get("Connection"); len(v) == 0 {
-		return false
-	}
-	if v := header.Get("Upgrade"); len(v) == 0 {
-		return false
-	}
-	if v := header.Get("Sec-Websocket-Version"); len(v) == 0 {
-		return false
-	}
-	if v := header.Get("Sec-Websocket-Key"); len(v) == 0 {
-		return false
-	}
-	return true
-}
-
 var replacer = strings.NewReplacer("+", "-", "/", "_", "=", "")
 
 func decodeEd(s string) ([]byte, error) {
@@ -100,7 +84,7 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 	go func() {
 		defer close(ch)
-		if !isWsUpgrade(r.Header) {
+		if !websocket.IsWebSocketUpgrade(r) {
 			return
 		}
 		tcp, err := net.Dial("tcp", s.DestAddress)
@@ -160,7 +144,7 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 
 	go func() {
 		defer close(ch)
-		if !isWsUpgrade(r.Header) {
+		if !websocket.IsWebSocketUpgrade(r) {
 			return
 		}
 		// send inHeader to client for Xray's 0rtt ws
