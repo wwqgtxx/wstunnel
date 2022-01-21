@@ -1,12 +1,13 @@
 package main
 
 import (
-	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net"
 	"sync"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 const (

@@ -2,8 +2,6 @@ package main
 
 import (
 	"crypto/tls"
-	"encoding/base64"
-	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net"
@@ -12,6 +10,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/gorilla/websocket"
 )
 
 var PortToClient = make(map[string]Client)
@@ -63,7 +63,7 @@ func (c *client) SetClientImpl(impl ClientImpl) {
 type ClientImpl interface {
 	Target() string
 	Handle(tcp net.Conn)
-	Dial(args ...interface{}) (io.Closer, error)
+	Dial(edBuf []byte, inHeader http.Header) (io.Closer, error)
 	ToRawConn(conn io.Closer) net.Conn
 	Tunnel(tcp net.Conn, conn io.Closer)
 }
@@ -87,20 +87,12 @@ func (c *wsClientImpl) Target() string {
 func (c *wsClientImpl) Handle(tcp net.Conn) {
 	defer tcp.Close()
 	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
-	header := http.Header{}
-	// Xray's 0rtt ws
-	if c.ed > 0 {
-		buf := make([]byte, c.ed)
-		n, err := tcp.Read(buf)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-		buf = buf[:n]
-
-		header.Set("Sec-WebSocket-Protocol", base64.RawURLEncoding.EncodeToString(buf))
+	header, edBuf, err := encodeXray0rtt(tcp, c)
+	if err != nil {
+		log.Println(err)
+		return
 	}
-	conn, err := c.Dial(header)
+	conn, err := c.Dial(edBuf, header)
 	if err != nil {
 		log.Println(err)
 		return
@@ -109,36 +101,35 @@ func (c *wsClientImpl) Handle(tcp net.Conn) {
 	c.Tunnel(tcp, conn)
 }
 
-func (c *wsClientImpl) Dial(args ...interface{}) (io.Closer, error) {
+func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, error) {
 	header := c.header
-	if len(args) >= 1 {
-		if inHeader, ok := args[0].(http.Header); ok && len(inHeader) > 0 {
-			// copy from inHeader
-			header = inHeader.Clone()
-			// don't use inHeader's `Host`
-			header.Del("Host")
+	if len(inHeader) > 0 {
+		// copy from inHeader
+		header = inHeader.Clone()
+		// don't use inHeader's `Host`
+		header.Del("Host")
 
-			// merge from c.header
-			for k, vs := range c.header {
-				header[k] = vs
-			}
+		// merge from c.header
+		for k, vs := range c.header {
+			header[k] = vs
+		}
 
-			// duplicate header is not allowed, remove
-			header.Del("Upgrade")
-			header.Del("Connection")
-			header.Del("Sec-Websocket-Key")
-			header.Del("Sec-Websocket-Version")
-			header.Del("Sec-Websocket-Extensions")
-			header.Del("Sec-WebSocket-Protocol")
+		// duplicate header is not allowed, remove
+		header.Del("Upgrade")
+		header.Del("Connection")
+		header.Del("Sec-Websocket-Key")
+		header.Del("Sec-Websocket-Version")
+		header.Del("Sec-Websocket-Extensions")
+		header.Del("Sec-WebSocket-Protocol")
 
-			// force use inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
-			if secProtocol := inHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-				header.Set("Sec-WebSocket-Protocol", secProtocol)
-			}
+		// force use inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
+		if secProtocol := inHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
+			header.Set("Sec-WebSocket-Protocol", secProtocol)
 		}
 	}
 	log.Println("Dial to", c.Target(), "with", header)
-	ws, _, err := c.wsDialer.Dial(c.Target(), header)
+	ws, resp, err := c.wsDialer.Dial(c.Target(), header)
+	log.Println("Dial", c.Target(), "get response", resp.Header)
 	return ws, err
 }
 
@@ -158,7 +149,7 @@ func (c *tcpClientImpl) Target() string {
 func (c *tcpClientImpl) Handle(tcp net.Conn) {
 	defer tcp.Close()
 	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
-	conn, err := c.Dial()
+	conn, err := c.Dial(nil, nil)
 	if err != nil {
 		log.Println(err)
 		return
@@ -167,8 +158,12 @@ func (c *tcpClientImpl) Handle(tcp net.Conn) {
 	c.Tunnel(tcp, conn)
 }
 
-func (c *tcpClientImpl) Dial(args ...interface{}) (io.Closer, error) {
-	return c.tcpDialer.Dial("tcp", c.Target())
+func (c *tcpClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, error) {
+	tcp, err := c.tcpDialer.Dial("tcp", c.Target())
+	if err == nil && len(edBuf) > 0 {
+		_, err = tcp.Write(edBuf)
+	}
+	return tcp, err
 }
 
 func (c *tcpClientImpl) ToRawConn(conn io.Closer) net.Conn {

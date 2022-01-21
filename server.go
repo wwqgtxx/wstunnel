@@ -1,13 +1,12 @@
 package main
 
 import (
-	"encoding/base64"
-	"github.com/gorilla/websocket"
 	"io"
 	"log"
 	"net"
 	"net/http"
-	"strings"
+
+	"github.com/gorilla/websocket"
 )
 
 var PortToServer = make(map[string]Server)
@@ -50,12 +49,6 @@ func (s *server) CloneWithNewAddress(bindAddress string) Server {
 	}
 }
 
-var replacer = strings.NewReplacer("+", "-", "/", "_", "=", "")
-
-func decodeEd(s string) ([]byte, error) {
-	return base64.RawURLEncoding.DecodeString(replacer.Replace(s))
-}
-
 type ServerHandler http.Handler
 
 type normalServerHandler struct {
@@ -77,15 +70,7 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 		}
 	}()
 
-	var edBuf []byte
-	responseHeader := http.Header{}
-	// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
-	if secProtocol := r.Header.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-		if buf, err := decodeEd(secProtocol); err == nil { // sure could base64 decode
-			edBuf = buf
-			responseHeader.Set("Sec-WebSocket-Protocol", secProtocol)
-		}
-	}
+	edBuf, responseHeader := decodeXray0rtt(r.Header)
 
 	go func() {
 		defer close(ch)
@@ -141,18 +126,12 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		}
 	}()
 
-	responseHeader := http.Header{}
-	// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
-	if secProtocol := r.Header.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-		if _, err := decodeEd(secProtocol); err == nil { // sure could base64 decode
-			responseHeader.Set("Sec-WebSocket-Protocol", secProtocol)
-		}
-	}
+	edBuf, responseHeader := decodeXray0rtt(r.Header)
 
 	go func() {
 		defer close(ch)
 		// send inHeader to client for Xray's 0rtt ws
-		ws2, err := s.Client.Dial(r.Header)
+		ws2, err := s.Client.Dial(edBuf, r.Header)
 		if err != nil {
 			log.Println(err)
 			return
