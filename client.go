@@ -98,7 +98,7 @@ func (c *wsClientImpl) Handle(tcp net.Conn) {
 		}
 		buf = buf[:n]
 
-		header.Set("Sec-WebSocket-Protocol", base64.StdEncoding.EncodeToString(buf))
+		header.Set("Sec-WebSocket-Protocol", base64.RawURLEncoding.EncodeToString(buf))
 	}
 	conn, err := c.Dial(header)
 	if err != nil {
