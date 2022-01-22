@@ -129,7 +129,9 @@ func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, erro
 	}
 	log.Println("Dial to", c.Target(), "with", header)
 	ws, resp, err := c.wsDialer.Dial(c.Target(), header)
-	log.Println("Dial", c.Target(), "get response", resp.Header)
+	if resp != nil {
+		log.Println("Dial", c.Target(), "get response", resp.Header)
+	}
 	return ws, err
 }
 
