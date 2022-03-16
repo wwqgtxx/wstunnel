@@ -15,7 +15,7 @@ const (
 )
 
 var (
-	BufPool         = sync.Pool{New: func() interface{} { return make([]byte, BufSize) }}
+	BufPool         = sync.Pool{New: func() any { return make([]byte, BufSize) }}
 	WriteBufferPool = &sync.Pool{}
 )
 
