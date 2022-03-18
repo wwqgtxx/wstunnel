@@ -22,11 +22,13 @@ type Client interface {
 	Addr() string
 	GetClientImpl() ClientImpl
 	SetClientImpl(impl ClientImpl)
+	GetServerWSPath() string
 }
 
 type client struct {
 	ClientImpl
-	bindAddress string
+	bindAddress  string
+	serverWSPath string
 }
 
 func (c *client) Start() {
@@ -56,12 +58,18 @@ func (c *client) Addr() string {
 func (c *client) GetClientImpl() ClientImpl {
 	return c.ClientImpl
 }
+
 func (c *client) SetClientImpl(impl ClientImpl) {
 	c.ClientImpl = impl
 }
 
+func (c *client) GetServerWSPath() string {
+	return c.serverWSPath
+}
+
 type ClientImpl interface {
 	Target() string
+	Proxy() string
 	Handle(tcp net.Conn)
 	Dial(edBuf []byte, inHeader http.Header) (io.Closer, error)
 	ToRawConn(conn io.Closer) net.Conn
@@ -73,20 +81,26 @@ type wsClientImpl struct {
 	wsUrl    string
 	wsDialer *websocket.Dialer
 	ed       uint32
+	proxy    string
 }
 
 type tcpClientImpl struct {
 	targetAddress string
-	tcpDialer     *net.Dialer
+	netDial       netDialerFunc
+	proxy         string
 }
 
 func (c *wsClientImpl) Target() string {
 	return c.wsUrl
 }
 
+func (c *wsClientImpl) Proxy() string {
+	return c.proxy
+}
+
 func (c *wsClientImpl) Handle(tcp net.Conn) {
 	defer tcp.Close()
-	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
+	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target(), c.Proxy())
 	header, edBuf, err := encodeXray0rtt(tcp, c)
 	if err != nil {
 		log.Println(err)
@@ -127,10 +141,10 @@ func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, erro
 			header.Set("Sec-WebSocket-Protocol", secProtocol)
 		}
 	}
-	log.Println("Dial to", c.Target(), "with", header)
+	log.Println("Dial to", c.Target(), c.Proxy(), "with", header)
 	ws, resp, err := c.wsDialer.Dial(c.Target(), header)
 	if resp != nil {
-		log.Println("Dial", c.Target(), "get response", resp.Header)
+		log.Println("Dial", c.Target(), c.Proxy(), "get response", resp.Header)
 	}
 	return ws, err
 }
@@ -148,9 +162,13 @@ func (c *tcpClientImpl) Target() string {
 	return c.targetAddress
 }
 
+func (c *tcpClientImpl) Proxy() string {
+	return c.proxy
+}
+
 func (c *tcpClientImpl) Handle(tcp net.Conn) {
 	defer tcp.Close()
-	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target())
+	log.Println("Incoming --> ", tcp.RemoteAddr(), " --> ", c.Target(), c.Proxy())
 	conn, err := c.Dial(nil, nil)
 	if err != nil {
 		log.Println(err)
@@ -161,7 +179,7 @@ func (c *tcpClientImpl) Handle(tcp net.Conn) {
 }
 
 func (c *tcpClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, error) {
-	tcp, err := c.tcpDialer.Dial("tcp", c.Target())
+	tcp, err := c.netDial("tcp", c.Target())
 	if err == nil && len(edBuf) > 0 {
 		_, err = tcp.Write(edBuf)
 	}
@@ -177,19 +195,51 @@ func (c *tcpClientImpl) Tunnel(tcp net.Conn, conn io.Closer) {
 }
 
 func BuildClient(config ClientConfig) {
-	var c Client
+	var cImpl ClientImpl
+	var proxyUrl *url.URL
+	var proxyStr string
+	if len(config.Proxy) > 0 {
+		u, err := url.Parse(config.Proxy)
+		if err != nil {
+			log.Println(err)
+		}
+		proxyUrl = u
+
+		ru := *u
+		ru.User = nil
+		proxyStr = ru.String()
+	}
 	if len(config.TargetAddress) > 0 {
+		var netDial netDialerFunc
 		tcpDialer := &net.Dialer{
 			Timeout: 45 * time.Second,
 		}
-		c = &client{
-			ClientImpl: &tcpClientImpl{
-				targetAddress: config.TargetAddress,
-				tcpDialer:     tcpDialer,
-			},
-			bindAddress: config.BindAddress,
+		netDial = tcpDialer.Dial
+
+		proxyDialer := proxy_FromEnvironment()
+		if proxyUrl != nil {
+			dialer, err := proxy_FromURL(proxyUrl, netDial)
+			if err != nil {
+				log.Println(err)
+			} else {
+				proxyDialer = dialer
+			}
+		}
+		if proxyDialer != proxy_Direct {
+			netDial = proxyDialer.Dial
+		}
+
+		cImpl = &tcpClientImpl{
+			targetAddress: config.TargetAddress,
+			netDial:       netDial,
+			proxy:         proxyStr,
 		}
 	} else {
+		proxy := http.ProxyFromEnvironment
+		if proxyUrl != nil {
+			proxy = http.ProxyURL(proxyUrl)
+		}
+
 		header := http.Header{}
 		if len(config.WSHeaders) != 0 {
 			for key, value := range config.WSHeaders {
@@ -197,7 +247,7 @@ func BuildClient(config ClientConfig) {
 			}
 		}
 		wsDialer := &websocket.Dialer{
-			Proxy:            http.ProxyFromEnvironment,
+			Proxy:            proxy,
 			HandshakeTimeout: 45 * time.Second,
 			ReadBufferSize:   BufSize,
 			WriteBufferSize:  BufSize,
@@ -217,21 +267,27 @@ func BuildClient(config ClientConfig) {
 				config.WSUrl = u.String()
 			}
 		}
-		c = &client{
-			ClientImpl: &wsClientImpl{
-				header:   header,
-				wsUrl:    config.WSUrl,
-				wsDialer: wsDialer,
-				ed:       ed,
-			},
-			bindAddress: config.BindAddress,
+		cImpl = &wsClientImpl{
+			header:   header,
+			wsUrl:    config.WSUrl,
+			wsDialer: wsDialer,
+			ed:       ed,
+			proxy:    proxyStr,
 		}
 	}
-
 	_, port, err := net.SplitHostPort(config.BindAddress)
 	if err != nil {
 		log.Println(err)
 	}
+
+	serverWSPath := strings.ReplaceAll(config.ServerWSPath, "{port}", port)
+
+	c := &client{
+		ClientImpl:   cImpl,
+		bindAddress:  config.BindAddress,
+		serverWSPath: serverWSPath,
+	}
+
 	PortToClient[port] = c
 }
 

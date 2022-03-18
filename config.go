@@ -14,6 +14,8 @@ type ClientConfig struct {
 	WSHeaders      map[string]string `yaml:"ws-headers"`
 	SkipCertVerify bool              `yaml:"skip-cert-verify"`
 	ServerName     string            `yaml:"servername"`
+	Proxy          string            `yaml:"proxy"`
+	ServerWSPath   string            `yaml:"server-ws-path"`
 }
 
 type ServerConfig struct {

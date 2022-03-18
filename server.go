@@ -108,6 +108,7 @@ func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) 
 
 type internalServerHandler struct {
 	DestAddress string
+	Proxy       string
 	Client      Client
 }
 
@@ -117,7 +118,7 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, ") --> ", s.Client.Target())
+	log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, s.Proxy, ") --> ", s.Client.Target())
 
 	ch := make(chan io.Closer)
 	defer func() {
@@ -172,6 +173,15 @@ func closeTcpHandle(writer http.ResponseWriter, request *http.Request) {
 func BuildServer(config ServerConfig) {
 	mux := http.NewServeMux()
 	hadRoot := false
+	for port, client := range PortToClient {
+		wsPath := client.GetServerWSPath()
+		if len(wsPath) > 0 {
+			config.Target = append(config.Target, ServerTargetConfig{
+				WSPath:        wsPath,
+				TargetAddress: net.JoinHostPort("127.0.0.1", port),
+			})
+		}
+	}
 	for _, target := range config.Target {
 		if len(target.WSPath) == 0 {
 			target.WSPath = "/"
@@ -186,10 +196,11 @@ func BuildServer(config ServerConfig) {
 			log.Println("Short circuit replace (",
 				target.WSPath, "<->", target.TargetAddress,
 				") to (",
-				target.WSPath, "<->", client.Target(),
+				target.WSPath, "<->", client.Target(), client.Proxy(),
 				")")
 			sh = &internalServerHandler{
 				DestAddress: target.TargetAddress,
+				Proxy:       client.Proxy(),
 				Client:      client,
 			}
 		} else {
