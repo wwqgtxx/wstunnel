@@ -31,6 +31,8 @@ type ServerTargetConfig struct {
 type Config struct {
 	ServerConfigs []ServerConfig `yaml:"server"`
 	ClientConfigs []ClientConfig `yaml:"client"`
+	DisableServer bool           `yaml:"disable-server"`
+	DisableClient bool           `yaml:"disable-client"`
 }
 
 func readConfig(path string) ([]byte, error) {
@@ -53,6 +55,8 @@ func parseConfig(buf []byte) (*Config, error) {
 	cfg := &Config{
 		ServerConfigs: []ServerConfig{},
 		ClientConfigs: []ClientConfig{},
+		DisableServer: false,
+		DisableClient: false,
 	}
 	if err := yaml.Unmarshal(buf, &cfg); err != nil {
 		return nil, err

@@ -32,8 +32,12 @@ func main() {
 	for _, serverConfig := range cfg.ServerConfigs {
 		BuildServer(serverConfig)
 	}
-	StartClients()
-	StartServers()
+	if !cfg.DisableClient {
+		StartClients()
+	}
+	if !cfg.DisableServer {
+		StartServers()
+	}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	<-sigCh
