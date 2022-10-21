@@ -6,6 +6,10 @@ import (
 	"os/signal"
 	"path/filepath"
 	"syscall"
+
+	"github.com/wwqgtxx/wstunnel/client"
+	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/server"
 )
 
 func main() {
@@ -18,25 +22,25 @@ func main() {
 		currentDir, _ := os.Getwd()
 		configFile = filepath.Join(currentDir, configFile)
 	}
-	buf, err := readConfig(configFile)
+	buf, err := config.ReadConfig(configFile)
 	if err != nil {
 		panic(err)
 	}
-	cfg, err := parseConfig(buf)
+	cfg, err := config.ParseConfig(buf)
 	if err != nil {
 		panic(err)
 	}
 	for _, clientConfig := range cfg.ClientConfigs {
-		BuildClient(clientConfig)
+		client.BuildClient(clientConfig)
 	}
 	for _, serverConfig := range cfg.ServerConfigs {
-		BuildServer(serverConfig)
+		server.BuildServer(serverConfig)
 	}
 	if !cfg.DisableClient {
-		StartClients()
+		client.StartClients()
 	}
 	if !cfg.DisableServer {
-		StartServers()
+		server.StartServers()
 	}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

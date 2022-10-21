@@ -1,6 +1,8 @@
 server:
   -
     bind-address: 0.0.0.0:8080
+    ssh-fallback-address: 127.0.0.1:22
+    ssh-fallback-timeout: 3
     target:
       -
         target-address: 127.0.0.1:80

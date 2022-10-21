@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package main
+package client
 
 import (
 	"bufio"
@@ -14,16 +14,16 @@ import (
 	"strings"
 )
 
-type netDialerFunc func(network, addr string) (net.Conn, error)
-
-func (fn netDialerFunc) Dial(network, addr string) (net.Conn, error) {
-	return fn(network, addr)
-}
-
 func init() {
 	proxy_RegisterDialerType("http", func(proxyURL *url.URL, forwardDialer proxy_Dialer) (proxy_Dialer, error) {
 		return &httpProxyDialer{proxyURL: proxyURL, forwardDial: forwardDialer.Dial}, nil
 	})
+}
+
+type NetDialerFunc func(network, addr string) (net.Conn, error)
+
+func (fn NetDialerFunc) Dial(network, addr string) (net.Conn, error) {
+	return fn(network, addr)
 }
 
 func hostPortNoPort(u *url.URL) (hostPort, hostNoPort string) {

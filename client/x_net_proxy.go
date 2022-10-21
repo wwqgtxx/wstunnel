@@ -5,7 +5,7 @@
 // data.
 //
 
-package main
+package client
 
 import (
 	"errors"

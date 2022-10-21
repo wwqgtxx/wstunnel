@@ -1,9 +1,8 @@
-package main
+package config
 
 import (
 	"fmt"
 	"gopkg.in/yaml.v3"
-	"io/ioutil"
 	"os"
 )
 
@@ -19,8 +18,10 @@ type ClientConfig struct {
 }
 
 type ServerConfig struct {
-	BindAddress string               `yaml:"bind-address"`
-	Target      []ServerTargetConfig `yaml:"target"`
+	BindAddress        string               `yaml:"bind-address"`
+	Target             []ServerTargetConfig `yaml:"target"`
+	SshFallbackAddress string               `yaml:"ssh-fallback-address"`
+	SshFallbackTimeout int                  `yaml:"ssh-fallback-timeout"`
 }
 
 type ServerTargetConfig struct {
@@ -35,11 +36,11 @@ type Config struct {
 	DisableClient bool           `yaml:"disable-client"`
 }
 
-func readConfig(path string) ([]byte, error) {
+func ReadConfig(path string) ([]byte, error) {
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		return nil, err
 	}
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
@@ -51,7 +52,7 @@ func readConfig(path string) ([]byte, error) {
 	return data, err
 }
 
-func parseConfig(buf []byte) (*Config, error) {
+func ParseConfig(buf []byte) (*Config, error) {
 	cfg := &Config{
 		ServerConfigs: []ServerConfig{},
 		ClientConfigs: []ClientConfig{},
