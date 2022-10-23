@@ -13,6 +13,7 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/listener"
 	"github.com/wwqgtxx/wstunnel/tunnel"
 	"github.com/wwqgtxx/wstunnel/utils"
 
@@ -21,20 +22,21 @@ import (
 
 type client struct {
 	common.ClientImpl
-	bindAddress  string
-	serverWSPath string
+	bindAddress       string
+	serverWSPath      string
+	sshFallbackConfig config.SshFallbackConfig
 }
 
 func (c *client) Start() {
 	log.Println("New Client Listening on:", c.bindAddress)
 	go func() {
-		listener, err := net.Listen("tcp", c.bindAddress)
+		ln, err := listener.ListenTcp(c.bindAddress, c.sshFallbackConfig)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 		for {
-			tcp, err := listener.Accept()
+			tcp, err := ln.Accept()
 			if err != nil {
 				log.Println(err)
 				<-time.After(3 * time.Second)
@@ -188,9 +190,10 @@ func BuildClient(config config.ClientConfig) {
 	serverWSPath := strings.ReplaceAll(config.ServerWSPath, "{port}", port)
 
 	c := &client{
-		ClientImpl:   NewClientImpl(config),
-		bindAddress:  config.BindAddress,
-		serverWSPath: serverWSPath,
+		ClientImpl:        NewClientImpl(config),
+		bindAddress:       config.BindAddress,
+		serverWSPath:      serverWSPath,
+		sshFallbackConfig: config.SshFallbackConfig,
 	}
 
 	common.PortToClient[port] = c
