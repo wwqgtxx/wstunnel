@@ -6,12 +6,8 @@ import (
 	"net"
 )
 
-func Peek(conn net.Conn, buf []byte) (net.Conn, error) {
+func Peek(conn net.Conn, n int) (net.Conn, []byte, error) {
 	bufConn := NewBufferedConn(conn)
-	data, err := bufConn.Peek(len(buf))
-	if err != nil {
-		return bufConn, err
-	}
-	copy(buf, data)
-	return bufConn, nil
+	data, err := bufConn.Peek(n)
+	return bufConn, data, err
 }

@@ -22,15 +22,14 @@ import (
 
 type client struct {
 	common.ClientImpl
-	bindAddress       string
-	serverWSPath      string
-	sshFallbackConfig config.SshFallbackConfig
+	serverWSPath   string
+	listenerConfig config.ListenerConfig
 }
 
 func (c *client) Start() {
-	log.Println("New Client Listening on:", c.bindAddress)
+	log.Println("New Client Listening on:", c.Addr())
 	go func() {
-		ln, err := listener.ListenTcp(c.bindAddress, c.sshFallbackConfig)
+		ln, err := listener.ListenTcp(c.listenerConfig)
 		if err != nil {
 			log.Println(err)
 			return
@@ -48,7 +47,7 @@ func (c *client) Start() {
 }
 
 func (c *client) Addr() string {
-	return c.bindAddress
+	return c.listenerConfig.BindAddress
 }
 
 func (c *client) GetClientImpl() common.ClientImpl {
@@ -181,19 +180,18 @@ func (c *tcpClientImpl) Tunnel(tcp net.Conn, conn io.Closer) {
 	tunnel.TunnelTcpTcp(tcp, conn.(net.Conn))
 }
 
-func BuildClient(config config.ClientConfig) {
-	_, port, err := net.SplitHostPort(config.BindAddress)
+func BuildClient(clientConfig config.ClientConfig) {
+	_, port, err := net.SplitHostPort(clientConfig.BindAddress)
 	if err != nil {
 		log.Println(err)
 	}
 
-	serverWSPath := strings.ReplaceAll(config.ServerWSPath, "{port}", port)
+	serverWSPath := strings.ReplaceAll(clientConfig.ServerWSPath, "{port}", port)
 
 	c := &client{
-		ClientImpl:        NewClientImpl(config),
-		bindAddress:       config.BindAddress,
-		serverWSPath:      serverWSPath,
-		sshFallbackConfig: config.SshFallbackConfig,
+		ClientImpl:     NewClientImpl(clientConfig),
+		serverWSPath:   serverWSPath,
+		listenerConfig: clientConfig.ListenerConfig,
 	}
 
 	common.PortToClient[port] = c

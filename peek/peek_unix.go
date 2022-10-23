@@ -8,12 +8,13 @@ import (
 	"syscall"
 )
 
-func Peek(conn net.Conn, buf []byte) (net.Conn, error) {
+func Peek(conn net.Conn, n int) (net.Conn, []byte, error) {
 	var sysErr error = nil
 	rc, err := conn.(syscall.Conn).SyscallConn()
 	if err != nil {
-		return conn, err
+		return conn, nil, err
 	}
+	buf := make([]byte, n)
 	err = rc.Read(func(fd uintptr) bool {
 		n, _, err := syscall.Recvfrom(int(fd), buf, syscall.MSG_PEEK)
 		switch {
@@ -28,7 +29,7 @@ func Peek(conn net.Conn, buf []byte) (net.Conn, error) {
 		return true
 	})
 	if err != nil {
-		return conn, err
+		return conn, nil, err
 	}
-	return conn, sysErr
+	return conn, buf, sysErr
 }

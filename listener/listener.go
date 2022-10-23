@@ -1,7 +1,6 @@
 package listener
 
 import (
-	"bytes"
 	"errors"
 	"log"
 	"net"
@@ -14,13 +13,23 @@ import (
 	"github.com/wwqgtxx/wstunnel/peek"
 )
 
+const (
+	SSHStartString = "SSH"
+	TLSStartString = "\x16\x03\x01" // TLS1.0 Handshake (works on TLS1.0, 1.1, 1.2, 1.3)
+	WSStartString  = "GET"          // websocket handshake actually is an HTTP GET
+
+	PeekLength = 3
+)
+
 type tcpListener struct {
 	net.Listener
 	closed *atomic.Bool
 	ch     chan acceptResult
 
-	sshFallbackClientImpl common.ClientImpl
-	sshFallbackTimeout    time.Duration
+	sshClientImpl      common.ClientImpl
+	sshFallbackTimeout time.Duration
+	tlsClientImpl      common.ClientImpl
+	unknownClientImpl  common.ClientImpl
 }
 
 type acceptResult struct {
@@ -54,56 +63,90 @@ func (l *tcpListener) loop() {
 			continue
 		}
 		go func() {
-			if l.sshFallbackClientImpl != nil {
-				tunnelSSH := func(isTimeout bool) {
-					log.Println("Incoming SSH Fallback --> ", conn.RemoteAddr(), " --> ", l.sshFallbackClientImpl.Target(), l.sshFallbackClientImpl.Proxy(), "isTimeout=", isTimeout)
-					defer func() {
-						_ = conn.Close()
-					}()
-					conn2, err := l.sshFallbackClientImpl.Dial(nil, nil)
-					if err != nil {
-						log.Println(err)
-						return
-					}
-					l.sshFallbackClientImpl.Tunnel(conn, conn2)
-				}
-
-				buf := make([]byte, 3)
+			var buf []byte
+			if l.sshFallbackTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(l.sshFallbackTimeout))
-				conn, err = peek.Peek(conn, buf)
-				_ = conn.SetReadDeadline(time.Time{})
+			}
+			conn, buf, err = peek.Peek(conn, PeekLength)
+			_ = conn.SetReadDeadline(time.Time{})
+
+			tunnel := func(clientImpl common.ClientImpl, name string, isTimeout bool) {
+				log.Println("Incoming", name, "Fallback --> ", conn.RemoteAddr(), " --> ", clientImpl.Target(), clientImpl.Proxy(), "isTimeout=", isTimeout)
+				defer func() {
+					_ = conn.Close()
+				}()
+				conn2, err := clientImpl.Dial(nil, nil)
 				if err != nil {
-					if errors.Is(err, os.ErrDeadlineExceeded) {
-						tunnelSSH(true)
-						return
-					}
 					log.Println(err)
 					return
 				}
-				//log.Println(string(buf))
-				if bytes.Equal(buf, []byte("SSH")) {
-					tunnelSSH(false)
+				clientImpl.Tunnel(conn, conn2)
+			}
+			accept := func() {
+				l.ch <- acceptResult{conn: conn, err: err}
+			}
+
+			if err != nil {
+				if l.sshClientImpl != nil && errors.Is(err, os.ErrDeadlineExceeded) { // some client wait SSH server send handshake first (eg: motty).
+					tunnel(l.sshClientImpl, "SSH", true)
+					return
+				}
+				log.Println(err)
+				return
+			}
+			bufString := string(buf)
+			//log.Println(bufString)
+			switch bufString {
+			case SSHStartString:
+				if l.sshClientImpl != nil {
+					tunnel(l.sshClientImpl, "SSH", false)
+					return
+				}
+			case TLSStartString:
+				if l.tlsClientImpl != nil {
+					tunnel(l.tlsClientImpl, "TLS", false)
+					return
+				}
+			case WSStartString:
+				if l.unknownClientImpl != nil {
+					accept()
 					return
 				}
 			}
-			l.ch <- acceptResult{conn: conn, err: err}
+			if l.unknownClientImpl != nil {
+				tunnel(l.unknownClientImpl, "Unknown", false)
+			} else {
+				accept()
+			}
 		}()
-
 	}
 }
 
-func ListenTcp(address string, sshFallbackConfig config.SshFallbackConfig) (net.Listener, error) {
-	netLn, err := net.Listen("tcp", address)
+func ListenTcp(listenerConfig config.ListenerConfig) (net.Listener, error) {
+	netLn, err := net.Listen("tcp", listenerConfig.BindAddress)
 	if err != nil {
 		return nil, err
 	}
-	if len(sshFallbackConfig.SshFallbackAddress) > 0 {
-		sshClientImpl := common.NewClientImpl(config.ClientConfig{TargetAddress: sshFallbackConfig.SshFallbackAddress})
+	var sshClientImpl common.ClientImpl
+	var tlsClientImpl common.ClientImpl
+	var unknownClientImpl common.ClientImpl
+	if len(listenerConfig.SshFallbackAddress) > 0 {
+		sshClientImpl = common.NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.SshFallbackAddress})
+	}
+	if len(listenerConfig.TLSFallbackAddress) > 0 {
+		tlsClientImpl = common.NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.TLSFallbackAddress})
+	}
+	if len(listenerConfig.UnknownFallbackAddress) > 0 {
+		unknownClientImpl = common.NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.UnknownFallbackAddress})
+	}
+	if tlsClientImpl != nil || sshClientImpl != nil || unknownClientImpl != nil {
 		ln := &tcpListener{
-			Listener:              netLn,
-			sshFallbackClientImpl: sshClientImpl,
-			sshFallbackTimeout:    time.Duration(sshFallbackConfig.SshFallbackTimeout) * time.Second,
-			ch:                    make(chan acceptResult),
+			Listener:           netLn,
+			sshClientImpl:      sshClientImpl,
+			sshFallbackTimeout: time.Duration(listenerConfig.SshFallbackTimeout) * time.Second,
+			tlsClientImpl:      tlsClientImpl,
+			unknownClientImpl:  unknownClientImpl,
+			ch:                 make(chan acceptResult),
 		}
 		go ln.loop()
 		return ln, nil

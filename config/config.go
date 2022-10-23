@@ -7,26 +7,27 @@ import (
 )
 
 type ClientConfig struct {
-	BindAddress       string            `yaml:"bind-address"`
-	TargetAddress     string            `yaml:"target-address"`
-	WSUrl             string            `yaml:"ws-url"`
-	WSHeaders         map[string]string `yaml:"ws-headers"`
-	SkipCertVerify    bool              `yaml:"skip-cert-verify"`
-	ServerName        string            `yaml:"servername"`
-	Proxy             string            `yaml:"proxy"`
-	ServerWSPath      string            `yaml:"server-ws-path"`
-	SshFallbackConfig `yaml:",inline"`
+	ListenerConfig `yaml:",inline"`
+	TargetAddress  string            `yaml:"target-address"`
+	WSUrl          string            `yaml:"ws-url"`
+	WSHeaders      map[string]string `yaml:"ws-headers"`
+	SkipCertVerify bool              `yaml:"skip-cert-verify"`
+	ServerName     string            `yaml:"servername"`
+	Proxy          string            `yaml:"proxy"`
+	ServerWSPath   string            `yaml:"server-ws-path"`
 }
 
 type ServerConfig struct {
-	BindAddress string               `yaml:"bind-address"`
-	Target      []ServerTargetConfig `yaml:"target"`
-	SshFallbackConfig
+	ListenerConfig `yaml:",inline"`
+	Target         []ServerTargetConfig `yaml:"target"`
 }
 
-type SshFallbackConfig struct {
-	SshFallbackAddress string `yaml:"ssh-fallback-address"`
-	SshFallbackTimeout int    `yaml:"ssh-fallback-timeout"`
+type ListenerConfig struct {
+	BindAddress            string `yaml:"bind-address"`
+	TLSFallbackAddress     string `yaml:"tls-fallback-address"`
+	SshFallbackAddress     string `yaml:"ssh-fallback-address"`
+	SshFallbackTimeout     int    `yaml:"ssh-fallback-timeout"`
+	UnknownFallbackAddress string `yaml:"unknown-fallback-address"`
 }
 
 type ServerTargetConfig struct {

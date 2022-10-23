@@ -22,16 +22,15 @@ var upgrader = websocket.Upgrader{
 }
 
 type server struct {
-	bindAddress       string
-	serverHandler     ServerHandler
-	sshFallbackConfig config.SshFallbackConfig
+	serverHandler  ServerHandler
+	listenerConfig config.ListenerConfig
 }
 
 func (s *server) Start() {
-	log.Println("New Server Listening on:", s.bindAddress)
+	log.Println("New Server Listening on:", s.Addr())
 	go func() {
-		server := &http.Server{Addr: s.bindAddress, Handler: s.serverHandler}
-		ln, err := listener.ListenTcp(s.bindAddress, s.sshFallbackConfig)
+		server := &http.Server{Addr: s.Addr(), Handler: s.serverHandler}
+		ln, err := listener.ListenTcp(s.listenerConfig)
 		if err != nil {
 			log.Println(err)
 			return
@@ -45,12 +44,12 @@ func (s *server) Start() {
 }
 
 func (s *server) Addr() string {
-	return s.bindAddress
+	return s.listenerConfig.BindAddress
 }
 
 func (s *server) CloneWithNewAddress(bindAddress string) common.Server {
 	ns := *s
-	ns.bindAddress = bindAddress
+	ns.listenerConfig.BindAddress = bindAddress
 	return &ns
 }
 
@@ -224,9 +223,8 @@ func BuildServer(serverConfig config.ServerConfig) {
 	}
 	var s common.Server
 	s = &server{
-		bindAddress:       serverConfig.BindAddress,
-		serverHandler:     mux,
-		sshFallbackConfig: serverConfig.SshFallbackConfig,
+		serverHandler:  mux,
+		listenerConfig: serverConfig.ListenerConfig,
 	}
 	_, port, err := net.SplitHostPort(serverConfig.BindAddress)
 	if err != nil {
