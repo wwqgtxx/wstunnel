@@ -9,7 +9,7 @@ import (
 
 var replacer = strings.NewReplacer("+", "-", "/", "_", "=", "")
 
-func decodeEd(s string) ([]byte, error) {
+func DecodeEd(s string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(replacer.Replace(s))
 }
 
@@ -18,7 +18,7 @@ func DecodeXray0rtt(requestHeader http.Header) ([]byte, http.Header) {
 	responseHeader := http.Header{}
 	// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
 	if secProtocol := requestHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-		if buf, err := decodeEd(secProtocol); err == nil { // sure could base64 decode
+		if buf, err := DecodeEd(secProtocol); err == nil { // sure could base64 decode
 			edBuf = buf
 			responseHeader.Set("Sec-WebSocket-Protocol", secProtocol)
 		}
@@ -26,7 +26,7 @@ func DecodeXray0rtt(requestHeader http.Header) ([]byte, http.Header) {
 	return edBuf, responseHeader
 }
 
-func encodeEd(edBuf []byte) string {
+func EncodeEd(edBuf []byte) string {
 	return base64.RawURLEncoding.EncodeToString(edBuf)
 }
 
@@ -42,7 +42,7 @@ func EncodeXray0rtt(tcp net.Conn, ed uint32) (http.Header, []byte, error) {
 		}
 		edBuf = edBuf[:n]
 
-		header.Set("Sec-WebSocket-Protocol", encodeEd(edBuf))
+		header.Set("Sec-WebSocket-Protocol", EncodeEd(edBuf))
 	}
 	return header, edBuf, nil
 }

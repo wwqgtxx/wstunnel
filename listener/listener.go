@@ -21,15 +21,25 @@ const (
 	PeekLength = 3
 )
 
+var NewClientImpl func(clientConfig config.ClientConfig) common.ClientImpl
+
+type Config struct {
+	config.ListenerConfig
+	config.ProxyConfig
+	IsWebSocketListener bool
+}
+
 type tcpListener struct {
 	net.Listener
 	closed *atomic.Bool
 	ch     chan acceptResult
 
-	sshClientImpl      common.ClientImpl
-	sshFallbackTimeout time.Duration
-	tlsClientImpl      common.ClientImpl
-	unknownClientImpl  common.ClientImpl
+	sshClientImpl       common.ClientImpl
+	sshFallbackTimeout  time.Duration
+	tlsClientImpl       common.ClientImpl
+	wsClientImpl        common.ClientImpl
+	unknownClientImpl   common.ClientImpl
+	isWebSocketListener bool
 }
 
 type acceptResult struct {
@@ -80,7 +90,7 @@ func (l *tcpListener) loop() {
 					log.Println(err)
 					return
 				}
-				clientImpl.Tunnel(conn, conn2)
+				conn2.TunnelTcp(conn)
 			}
 			accept := func() {
 				l.ch <- acceptResult{conn: conn, err: err}
@@ -94,6 +104,7 @@ func (l *tcpListener) loop() {
 				log.Println(err)
 				return
 			}
+			ws := false
 			bufString := string(buf)
 			//log.Println(bufString)
 			switch bufString {
@@ -108,45 +119,57 @@ func (l *tcpListener) loop() {
 					return
 				}
 			case WSStartString:
-				if l.unknownClientImpl != nil {
+				if l.wsClientImpl != nil {
+					tunnel(l.wsClientImpl, "WebSocket", false)
+					return
+				}
+				ws = true
+			}
+			if l.unknownClientImpl != nil {
+				if l.isWebSocketListener && ws {
 					accept()
+					return
+				} else {
+					tunnel(l.unknownClientImpl, "Unknown", false)
 					return
 				}
 			}
-			if l.unknownClientImpl != nil {
-				tunnel(l.unknownClientImpl, "Unknown", false)
-			} else {
-				accept()
-			}
+			accept()
 		}()
 	}
 }
 
-func ListenTcp(listenerConfig config.ListenerConfig) (net.Listener, error) {
+func ListenTcp(listenerConfig Config) (net.Listener, error) {
 	netLn, err := net.Listen("tcp", listenerConfig.BindAddress)
 	if err != nil {
 		return nil, err
 	}
 	var sshClientImpl common.ClientImpl
 	var tlsClientImpl common.ClientImpl
+	var wsClientImpl common.ClientImpl
 	var unknownClientImpl common.ClientImpl
 	if len(listenerConfig.SshFallbackAddress) > 0 {
-		sshClientImpl = common.NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.SshFallbackAddress})
+		sshClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.SshFallbackAddress, ProxyConfig: listenerConfig.ProxyConfig})
 	}
 	if len(listenerConfig.TLSFallbackAddress) > 0 {
-		tlsClientImpl = common.NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.TLSFallbackAddress})
+		tlsClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.TLSFallbackAddress, ProxyConfig: listenerConfig.ProxyConfig})
+	}
+	if len(listenerConfig.WSFallbackAddress) > 0 {
+		wsClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.WSFallbackAddress, ProxyConfig: listenerConfig.ProxyConfig})
 	}
 	if len(listenerConfig.UnknownFallbackAddress) > 0 {
-		unknownClientImpl = common.NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.UnknownFallbackAddress})
+		unknownClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.UnknownFallbackAddress, ProxyConfig: listenerConfig.ProxyConfig})
 	}
-	if tlsClientImpl != nil || sshClientImpl != nil || unknownClientImpl != nil {
+	if tlsClientImpl != nil || sshClientImpl != nil || wsClientImpl != nil || unknownClientImpl != nil {
 		ln := &tcpListener{
-			Listener:           netLn,
-			sshClientImpl:      sshClientImpl,
-			sshFallbackTimeout: time.Duration(listenerConfig.SshFallbackTimeout) * time.Second,
-			tlsClientImpl:      tlsClientImpl,
-			unknownClientImpl:  unknownClientImpl,
-			ch:                 make(chan acceptResult),
+			Listener:            netLn,
+			sshClientImpl:       sshClientImpl,
+			sshFallbackTimeout:  time.Duration(listenerConfig.SshFallbackTimeout) * time.Second,
+			tlsClientImpl:       tlsClientImpl,
+			wsClientImpl:        wsClientImpl,
+			unknownClientImpl:   unknownClientImpl,
+			isWebSocketListener: listenerConfig.IsWebSocketListener,
+			ch:                  make(chan acceptResult),
 		}
 		go ln.loop()
 		return ln, nil

@@ -1,7 +1,6 @@
 package server
 
 import (
-	"io"
 	"log"
 	"net"
 	"net/http"
@@ -23,7 +22,7 @@ var upgrader = websocket.Upgrader{
 
 type server struct {
 	serverHandler  ServerHandler
-	listenerConfig config.ListenerConfig
+	listenerConfig listener.Config
 }
 
 func (s *server) Start() {
@@ -55,79 +54,32 @@ func (s *server) CloneWithNewAddress(bindAddress string) common.Server {
 
 type ServerHandler http.Handler
 
-type normalServerHandler struct {
+type serverHandler struct {
+	common.ClientImpl
 	DestAddress string
+	IsInternal  bool
 }
 
-func (s *normalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if !websocket.IsWebSocketUpgrade(r) {
 		closeTcpHandle(w, r)
 		return
 	}
 
-	log.Println("Incoming --> ", r.RemoteAddr, r.Header, s.DestAddress)
+	if s.IsInternal {
+		log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, s.Proxy(), ") --> ", s.Target())
+	} else {
+		if len(s.Proxy()) > 0 {
+			log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( ", s.Proxy(), ") --> ", s.Target())
+		} else {
+			log.Println("Incoming --> ", r.RemoteAddr, r.Header, s.Target())
+		}
+	}
 
-	ch := make(chan net.Conn)
+	ch := make(chan common.ClientConn)
 	defer func() {
 		if i, ok := <-ch; ok {
-			_ = i.Close()
-		}
-	}()
-
-	edBuf, responseHeader := utils.DecodeXray0rtt(r.Header)
-
-	go func() {
-		defer close(ch)
-		tcp, err := net.Dial("tcp", s.DestAddress)
-		if err != nil {
-			log.Println(err)
-			return
-		}
-
-		if len(edBuf) > 0 {
-			_, err = tcp.Write(edBuf)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-		}
-		ch <- tcp
-	}()
-
-	ws, err := upgrader.Upgrade(w, r, responseHeader)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	defer ws.Close()
-
-	tcp, ok := <-ch
-	if !ok {
-		return
-	}
-	defer tcp.Close()
-
-	tunnel.TunnelTcpWs(tcp, ws)
-}
-
-type internalServerHandler struct {
-	DestAddress string
-	Proxy       string
-	Client      common.Client
-}
-
-func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !websocket.IsWebSocketUpgrade(r) {
-		closeTcpHandle(w, r)
-		return
-	}
-
-	log.Println("Incoming --> ", r.RemoteAddr, r.Header, " --> ( [Client]", s.DestAddress, s.Proxy, ") --> ", s.Client.Target())
-
-	ch := make(chan io.Closer)
-	defer func() {
-		if i, ok := <-ch; ok {
-			_ = i.Close()
+			i.Close()
 		}
 	}()
 
@@ -136,12 +88,12 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 	go func() {
 		defer close(ch)
 		// send inHeader to client for Xray's 0rtt ws
-		ws2, err := s.Client.Dial(edBuf, r.Header)
+		target, err := s.Dial(edBuf, responseHeader)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		ch <- ws2
+		ch <- target
 	}()
 
 	ws, err := upgrader.Upgrade(w, r, responseHeader)
@@ -150,16 +102,13 @@ func (s *internalServerHandler) ServeHTTP(w http.ResponseWriter, r *http.Request
 		return
 	}
 	defer ws.Close()
-	source := ws.UnderlyingConn()
 
-	ws2, ok := <-ch
+	target, ok := <-ch
 	if !ok {
 		return
 	}
-	defer ws2.Close()
-	target := s.Client.ToRawConn(ws2)
-
-	tunnel.TunnelTcpTcp(target, source)
+	defer target.Close()
+	target.TunnelWs(ws)
 }
 
 func closeTcpHandle(writer http.ResponseWriter, request *http.Request) {
@@ -202,16 +151,21 @@ func BuildServer(serverConfig config.ServerConfig) {
 				") to (",
 				target.WSPath, "<->", _client.Target(), _client.Proxy(),
 				")")
-			sh = &internalServerHandler{
+			sh = &serverHandler{
+				ClientImpl:  _client.GetClientImpl(),
 				DestAddress: target.TargetAddress,
-				Proxy:       _client.Proxy(),
-				Client:      _client,
+				IsInternal:  true,
 			}
 		} else {
-			sh = &normalServerHandler{
-				DestAddress: target.TargetAddress,
+			proxyConfig := serverConfig.ProxyConfig
+			if target.ProxyConfig != nil {
+				proxyConfig = *target.ProxyConfig
 			}
-
+			sh = &serverHandler{
+				ClientImpl:  listener.NewClientImpl(config.ClientConfig{TargetAddress: target.TargetAddress, ProxyConfig: proxyConfig}),
+				DestAddress: target.TargetAddress,
+				IsInternal:  false,
+			}
 		}
 		if target.WSPath == "/" {
 			hadRoot = true
@@ -223,8 +177,12 @@ func BuildServer(serverConfig config.ServerConfig) {
 	}
 	var s common.Server
 	s = &server{
-		serverHandler:  mux,
-		listenerConfig: serverConfig.ListenerConfig,
+		serverHandler: mux,
+		listenerConfig: listener.Config{
+			ListenerConfig:      serverConfig.ListenerConfig,
+			ProxyConfig:         serverConfig.ProxyConfig,
+			IsWebSocketListener: true,
+		},
 	}
 	_, port, err := net.SplitHostPort(serverConfig.BindAddress)
 	if err != nil {

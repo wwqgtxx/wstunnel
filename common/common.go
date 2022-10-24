@@ -1,11 +1,10 @@
 package common
 
 import (
-	"io"
 	"net"
 	"net/http"
 
-	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/gorilla/websocket"
 )
 
 var PortToServer = make(map[string]Server)
@@ -31,9 +30,11 @@ type ClientImpl interface {
 	Target() string
 	Proxy() string
 	Handle(tcp net.Conn)
-	Dial(edBuf []byte, inHeader http.Header) (io.Closer, error)
-	ToRawConn(conn io.Closer) net.Conn
-	Tunnel(tcp net.Conn, conn io.Closer)
+	Dial(edBuf []byte, inHeader http.Header) (ClientConn, error)
 }
 
-var NewClientImpl func(config config.ClientConfig) ClientImpl
+type ClientConn interface {
+	Close()
+	TunnelTcp(tcp net.Conn)
+	TunnelWs(ws *websocket.Conn)
+}

@@ -19,7 +19,7 @@ var (
 	WriteBufferPool = &sync.Pool{}
 )
 
-func TcpToWs(tcp net.Conn, ws *websocket.Conn) (err error) {
+func fromTcpToWs(tcp net.Conn, ws *websocket.Conn) (err error) {
 	buf := BufPool.Get().([]byte)
 	for {
 		nBytes, err := tcp.Read(buf)
@@ -35,7 +35,7 @@ func TcpToWs(tcp net.Conn, ws *websocket.Conn) (err error) {
 	return
 }
 
-func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
+func fromWsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 	var reader io.Reader
 
 	buf := BufPool.Get().([]byte)
@@ -69,14 +69,14 @@ func WsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
 	return
 }
 
-func TunnelTcpWs(tcp net.Conn, ws *websocket.Conn) {
+func TcpWs(tcp net.Conn, ws *websocket.Conn) {
 	setKeepAlive(tcp)
 	setKeepAlive(ws.UnderlyingConn())
 
 	exit := make(chan int, 2)
 
 	go func() {
-		err := TcpToWs(tcp, ws)
+		err := fromTcpToWs(tcp, ws)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
@@ -84,7 +84,7 @@ func TunnelTcpWs(tcp net.Conn, ws *websocket.Conn) {
 	}()
 
 	go func() {
-		err := WsToTcp(ws, tcp)
+		err := fromWsToTcp(ws, tcp)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
@@ -93,7 +93,7 @@ func TunnelTcpWs(tcp net.Conn, ws *websocket.Conn) {
 	<-exit
 }
 
-func TunnelTcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
+func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 	setKeepAlive(tcp1)
 	setKeepAlive(tcp2)
 

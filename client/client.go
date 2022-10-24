@@ -2,13 +2,13 @@ package client
 
 import (
 	"crypto/tls"
-	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/wwqgtxx/wstunnel/common"
@@ -23,7 +23,7 @@ import (
 type client struct {
 	common.ClientImpl
 	serverWSPath   string
-	listenerConfig config.ListenerConfig
+	listenerConfig listener.Config
 }
 
 func (c *client) Start() {
@@ -98,10 +98,10 @@ func (c *wsClientImpl) Handle(tcp net.Conn) {
 		return
 	}
 	defer conn.Close()
-	c.Tunnel(tcp, conn)
+	conn.TunnelTcp(tcp)
 }
 
-func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, error) {
+func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (common.ClientConn, error) {
 	header := c.header
 	if len(inHeader) > 0 {
 		// copy from inHeader
@@ -124,24 +124,50 @@ func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, erro
 
 		// force use inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
 		if secProtocol := inHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-			header.Set("Sec-WebSocket-Protocol", secProtocol)
+			if c.ed > 0 {
+				header.Set("Sec-WebSocket-Protocol", secProtocol)
+				edBuf = nil
+			} else {
+				edBuf, _ = utils.DecodeEd(secProtocol)
+			}
 		}
+	}
+	if c.ed > 0 && len(edBuf) > 0 {
+		header.Set("Sec-WebSocket-Protocol", utils.EncodeEd(edBuf))
+		edBuf = nil
 	}
 	log.Println("Dial to", c.Target(), c.Proxy(), "with", header)
 	ws, resp, err := c.wsDialer.Dial(c.Target(), header)
 	if resp != nil {
 		log.Println("Dial", c.Target(), c.Proxy(), "get response", resp.Header)
 	}
-	return ws, err
+	if len(edBuf) > 0 {
+		err = ws.WriteMessage(websocket.BinaryMessage, edBuf)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &wsClientConn{ws: ws}, err
 }
 
-func (c *wsClientImpl) ToRawConn(conn io.Closer) net.Conn {
-	ws := conn.(*websocket.Conn)
-	return ws.UnderlyingConn()
+type wsClientConn struct {
+	ws    *websocket.Conn
+	close sync.Once
 }
 
-func (c *wsClientImpl) Tunnel(tcp net.Conn, conn io.Closer) {
-	tunnel.TunnelTcpWs(tcp, conn.(*websocket.Conn))
+func (c *wsClientConn) Close() {
+	c.close.Do(func() {
+		_ = c.ws.Close()
+	})
+}
+
+func (c *wsClientConn) TunnelTcp(tcp net.Conn) {
+	tunnel.TcpWs(tcp, c.ws)
+}
+
+func (c *wsClientConn) TunnelWs(ws *websocket.Conn) {
+	// fastpath for direct tunnel underlying ws connection
+	tunnel.TcpTcp(ws.UnderlyingConn(), c.ws.UnderlyingConn())
 }
 
 func (c *tcpClientImpl) Target() string {
@@ -161,23 +187,37 @@ func (c *tcpClientImpl) Handle(tcp net.Conn) {
 		return
 	}
 	defer conn.Close()
-	c.Tunnel(tcp, conn)
+	conn.TunnelTcp(tcp)
 }
 
-func (c *tcpClientImpl) Dial(edBuf []byte, inHeader http.Header) (io.Closer, error) {
+func (c *tcpClientImpl) Dial(edBuf []byte, inHeader http.Header) (common.ClientConn, error) {
 	tcp, err := c.netDial("tcp", c.Target())
 	if err == nil && len(edBuf) > 0 {
 		_, err = tcp.Write(edBuf)
+		if err != nil {
+			return nil, err
+		}
 	}
-	return tcp, err
+	return &tcpClientConn{tcp: tcp}, err
 }
 
-func (c *tcpClientImpl) ToRawConn(conn io.Closer) net.Conn {
-	return conn.(net.Conn)
+type tcpClientConn struct {
+	tcp   net.Conn
+	close sync.Once
 }
 
-func (c *tcpClientImpl) Tunnel(tcp net.Conn, conn io.Closer) {
-	tunnel.TunnelTcpTcp(tcp, conn.(net.Conn))
+func (c *tcpClientConn) Close() {
+	c.close.Do(func() {
+		_ = c.tcp.Close()
+	})
+}
+
+func (c *tcpClientConn) TunnelTcp(tcp net.Conn) {
+	tunnel.TcpTcp(tcp, c.tcp)
+}
+
+func (c *tcpClientConn) TunnelWs(ws *websocket.Conn) {
+	tunnel.TcpWs(c.tcp, ws)
 }
 
 func BuildClient(clientConfig config.ClientConfig) {
@@ -189,9 +229,13 @@ func BuildClient(clientConfig config.ClientConfig) {
 	serverWSPath := strings.ReplaceAll(clientConfig.ServerWSPath, "{port}", port)
 
 	c := &client{
-		ClientImpl:     NewClientImpl(clientConfig),
-		serverWSPath:   serverWSPath,
-		listenerConfig: clientConfig.ListenerConfig,
+		ClientImpl:   NewClientImpl(clientConfig),
+		serverWSPath: serverWSPath,
+		listenerConfig: listener.Config{
+			ListenerConfig:      clientConfig.ListenerConfig,
+			ProxyConfig:         clientConfig.ProxyConfig,
+			IsWebSocketListener: len(clientConfig.TargetAddress) > 0,
+		},
 	}
 
 	common.PortToClient[port] = c
@@ -212,16 +256,16 @@ func parseProxy(proxyString string) (proxyUrl *url.URL, proxyStr string) {
 	return
 }
 
-func NewClientImpl(config config.ClientConfig) common.ClientImpl {
-	if len(config.TargetAddress) > 0 {
-		return NewTcpClientImpl(config)
+func NewClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
+	if len(clientConfig.TargetAddress) > 0 {
+		return NewTcpClientImpl(clientConfig)
 	} else {
-		return NewWsClientImpl(config)
+		return NewWsClientImpl(clientConfig)
 	}
 }
 
-func NewTcpClientImpl(config config.ClientConfig) common.ClientImpl {
-	proxyUrl, proxyStr := parseProxy(config.Proxy)
+func NewTcpClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
+	proxyUrl, proxyStr := parseProxy(clientConfig.Proxy)
 
 	var netDial NetDialerFunc
 	tcpDialer := &net.Dialer{
@@ -243,14 +287,14 @@ func NewTcpClientImpl(config config.ClientConfig) common.ClientImpl {
 	}
 
 	return &tcpClientImpl{
-		targetAddress: config.TargetAddress,
+		targetAddress: clientConfig.TargetAddress,
 		netDial:       netDial,
 		proxy:         proxyStr,
 	}
 }
 
-func NewWsClientImpl(config config.ClientConfig) common.ClientImpl {
-	proxyUrl, proxyStr := parseProxy(config.Proxy)
+func NewWsClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
+	proxyUrl, proxyStr := parseProxy(clientConfig.Proxy)
 
 	proxy := http.ProxyFromEnvironment
 	if proxyUrl != nil {
@@ -258,8 +302,8 @@ func NewWsClientImpl(config config.ClientConfig) common.ClientImpl {
 	}
 
 	header := http.Header{}
-	if len(config.WSHeaders) != 0 {
-		for key, value := range config.WSHeaders {
+	if len(clientConfig.WSHeaders) != 0 {
+		for key, value := range clientConfig.WSHeaders {
 			header.Add(key, value)
 		}
 	}
@@ -271,22 +315,22 @@ func NewWsClientImpl(config config.ClientConfig) common.ClientImpl {
 		WriteBufferPool:  tunnel.WriteBufferPool,
 	}
 	wsDialer.TLSClientConfig = &tls.Config{
-		ServerName:         config.ServerName,
-		InsecureSkipVerify: config.SkipCertVerify,
+		ServerName:         clientConfig.ServerName,
+		InsecureSkipVerify: clientConfig.SkipCertVerify,
 	}
 	var ed uint32
-	if u, err := url.Parse(config.WSUrl); err == nil {
+	if u, err := url.Parse(clientConfig.WSUrl); err == nil {
 		if q := u.Query(); q.Get("ed") != "" {
 			Ed, _ := strconv.Atoi(q.Get("ed"))
 			ed = uint32(Ed)
 			q.Del("ed")
 			u.RawQuery = q.Encode()
-			config.WSUrl = u.String()
+			clientConfig.WSUrl = u.String()
 		}
 	}
 	return &wsClientImpl{
 		header:   header,
-		wsUrl:    config.WSUrl,
+		wsUrl:    clientConfig.WSUrl,
 		wsDialer: wsDialer,
 		ed:       ed,
 		proxy:    proxyStr,
@@ -329,5 +373,5 @@ func StartClients() {
 }
 
 func init() {
-	common.NewClientImpl = NewClientImpl
+	listener.NewClientImpl = NewClientImpl
 }
