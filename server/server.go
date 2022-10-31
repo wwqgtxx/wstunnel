@@ -52,6 +52,15 @@ func (s *server) CloneWithNewAddress(bindAddress string) common.Server {
 	return &ns
 }
 
+func (s *server) GetListenerConfig() any {
+	return s.listenerConfig
+}
+
+func (s *server) SetListenerConfig(cfg any) {
+	s.listenerConfig = cfg.(listener.Config)
+	s.listenerConfig.IsWebSocketListener = true
+}
+
 type ServerHandler http.Handler
 
 type serverHandler struct {

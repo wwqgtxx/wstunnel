@@ -58,6 +58,15 @@ func (c *client) SetClientImpl(impl common.ClientImpl) {
 	c.ClientImpl = impl
 }
 
+func (c *client) GetListenerConfig() any {
+	return c.listenerConfig
+}
+
+func (c *client) SetListenerConfig(cfg any) {
+	c.listenerConfig = cfg.(listener.Config)
+	c.listenerConfig.IsWebSocketListener = false
+}
+
 func (c *client) GetServerWSPath() string {
 	return c.serverWSPath
 }
@@ -353,6 +362,8 @@ func StartClients() {
 						client.Addr(),
 						")")
 					newServer := _server.CloneWithNewAddress(client.Addr())
+					listenerConfig := client.GetListenerConfig()
+					newServer.SetListenerConfig(listenerConfig)
 					common.PortToServer[clientPort] = newServer
 					delete(common.PortToClient, clientPort) //It is safe in Golang!!!
 					continue

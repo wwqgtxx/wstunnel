@@ -10,6 +10,7 @@ import (
 var PortToServer = make(map[string]Server)
 
 type Server interface {
+	HasListenerConfig
 	Start()
 	Addr() string
 	CloneWithNewAddress(bindAddress string) Server
@@ -19,6 +20,7 @@ var PortToClient = make(map[string]Client)
 
 type Client interface {
 	ClientImpl
+	HasListenerConfig
 	Start()
 	Addr() string
 	GetClientImpl() ClientImpl
@@ -37,4 +39,9 @@ type ClientConn interface {
 	Close()
 	TunnelTcp(tcp net.Conn)
 	TunnelWs(ws *websocket.Conn)
+}
+
+type HasListenerConfig interface {
+	GetListenerConfig() any
+	SetListenerConfig(cfg any)
 }
