@@ -90,6 +90,7 @@ func (l *tcpListener) loop() {
 					log.Println(err)
 					return
 				}
+				defer conn2.Close()
 				conn2.TunnelTcp(conn)
 			}
 			accept := func() {

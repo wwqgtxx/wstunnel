@@ -73,23 +73,23 @@ func TcpWs(tcp net.Conn, ws *websocket.Conn) {
 	setKeepAlive(tcp)
 	setKeepAlive(ws.UnderlyingConn())
 
-	exit := make(chan int, 2)
+	exit := make(chan struct{}, 1)
 
 	go func() {
 		err := fromTcpToWs(tcp, ws)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
-		exit <- 1
+		_ = ws.SetReadDeadline(time.Now())
+		exit <- struct{}{}
 	}()
 
-	go func() {
-		err := fromWsToTcp(ws, tcp)
-		if err != nil && err == io.EOF {
-			log.Println(err)
-		}
-		exit <- 1
-	}()
+	err := fromWsToTcp(ws, tcp)
+	if err != nil && err == io.EOF {
+		log.Println(err)
+	}
+	_ = tcp.SetReadDeadline(time.Now())
+
 	<-exit
 }
 
@@ -97,23 +97,23 @@ func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 	setKeepAlive(tcp1)
 	setKeepAlive(tcp2)
 
-	exit := make(chan int, 2)
+	exit := make(chan struct{}, 1)
 
 	go func() {
 		_, err := io.Copy(tcp1, tcp2)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
-		exit <- 1
+		_ = tcp1.SetReadDeadline(time.Now())
+		exit <- struct{}{}
 	}()
 
-	go func() {
-		_, err := io.Copy(tcp2, tcp1)
-		if err != nil && err == io.EOF {
-			log.Println(err)
-		}
-		exit <- 1
-	}()
+	_, err := io.Copy(tcp2, tcp1)
+	if err != nil && err == io.EOF {
+		log.Println(err)
+	}
+	_ = tcp2.SetReadDeadline(time.Now())
+
 	<-exit
 }
 
