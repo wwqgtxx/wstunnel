@@ -11,6 +11,8 @@ import (
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/peek"
+
+	"github.com/sagernet/tfo-go"
 )
 
 const (
@@ -141,7 +143,7 @@ func (l *tcpListener) loop() {
 }
 
 func ListenTcp(listenerConfig Config) (net.Listener, error) {
-	netLn, err := net.Listen("tcp", listenerConfig.BindAddress)
+	netLn, err := tfo.Listen("tcp", listenerConfig.BindAddress)
 	if err != nil {
 		return nil, err
 	}

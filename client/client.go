@@ -278,7 +278,7 @@ func NewTcpClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
 
 	var netDial NetDialerFunc
 	tcpDialer := &net.Dialer{
-		Timeout: 45 * time.Second,
+		Timeout: 8 * time.Second,
 	}
 	netDial = tcpDialer.Dial
 
@@ -318,7 +318,7 @@ func NewWsClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
 	}
 	wsDialer := &websocket.Dialer{
 		Proxy:            proxy,
-		HandshakeTimeout: 45 * time.Second,
+		HandshakeTimeout: 8 * time.Second,
 		ReadBufferSize:   tunnel.BufSize,
 		WriteBufferSize:  tunnel.BufSize,
 		WriteBufferPool:  tunnel.WriteBufferPool,

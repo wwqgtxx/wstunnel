@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	BufSize = 1024
+	BufSize = 4096
 )
 
 var (
