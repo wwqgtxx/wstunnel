@@ -83,9 +83,11 @@ func (l *tcpListener) loop() {
 				_ = conn.SetReadDeadline(time.Now().Add(l.sshFallbackTimeout))
 			}
 			buf, err = conn.Peek(PeekLength)
-			_ = conn.SetReadDeadline(time.Time{})
+			// move SetReadDeadline to accept() and tunnel()
+			//_ = conn.SetReadDeadline(time.Time{})
 
 			tunnel := func(clientImpl common.ClientImpl, name string, isTimeout bool) {
+				_ = conn.SetReadDeadline(time.Time{})
 				log.Println("Incoming", name, "Fallback --> ", conn.RemoteAddr(), " --> ", clientImpl.Target(), clientImpl.Proxy(), "isTimeout=", isTimeout)
 				defer func() {
 					_ = conn.Close()
@@ -99,6 +101,7 @@ func (l *tcpListener) loop() {
 				conn2.TunnelTcp(conn)
 			}
 			accept := func() {
+				_ = conn.SetReadDeadline(time.Time{})
 				l.ch <- acceptResult{conn: conn, err: err}
 			}
 
