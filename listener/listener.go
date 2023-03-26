@@ -2,6 +2,7 @@ package listener
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"net"
 	"os"
@@ -11,6 +12,7 @@ import (
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/peek"
+	"github.com/wwqgtxx/wstunnel/utils"
 
 	"github.com/sagernet/tfo-go"
 )
@@ -76,10 +78,11 @@ func (l *tcpListener) loop() {
 		}
 		go func() {
 			var buf []byte
+			conn := peek.NewPeekConn(conn)
 			if l.sshFallbackTimeout > 0 {
 				_ = conn.SetReadDeadline(time.Now().Add(l.sshFallbackTimeout))
 			}
-			conn, buf, err = peek.Peek(conn, PeekLength)
+			buf, err = conn.Peek(PeekLength)
 			_ = conn.SetReadDeadline(time.Time{})
 
 			tunnel := func(clientImpl common.ClientImpl, name string, isTimeout bool) {
@@ -118,7 +121,8 @@ func (l *tcpListener) loop() {
 				}
 			case TLSStartString:
 				if l.tlsClientImpl != nil {
-					tunnel(l.tlsClientImpl, "TLS", false)
+					sni := utils.ClientHelloServerName(conn)
+					tunnel(l.tlsClientImpl, fmt.Sprintf("TLS[%s]", sni), false)
 					return
 				}
 			case WSStartString:

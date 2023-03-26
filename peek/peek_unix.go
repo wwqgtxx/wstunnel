@@ -8,14 +8,26 @@ import (
 	"syscall"
 )
 
-func Peek(conn net.Conn, n int) (net.Conn, []byte, error) {
-	var sysErr error = nil
+func NewPeekConn(conn net.Conn) Conn {
 	rc, err := conn.(syscall.Conn).SyscallConn()
 	if err != nil {
-		return conn, nil, err
+		return NewBufferedConn(conn)
 	}
+	return &peekConn{
+		Conn: conn,
+		rc:   rc,
+	}
+}
+
+type peekConn struct {
+	net.Conn
+	rc syscall.RawConn
+}
+
+func (c *peekConn) Peek(n int) ([]byte, error) {
+	var sysErr error = nil
 	buf := make([]byte, n)
-	err = rc.Read(func(fd uintptr) bool {
+	err := c.rc.Read(func(fd uintptr) bool {
 		n, _, err := syscall.Recvfrom(int(fd), buf, syscall.MSG_PEEK)
 		switch {
 		case n == 0 && err == nil:
@@ -29,7 +41,7 @@ func Peek(conn net.Conn, n int) (net.Conn, []byte, error) {
 		return true
 	})
 	if err != nil {
-		return conn, nil, err
+		return nil, err
 	}
-	return conn, buf, sysErr
+	return buf, sysErr
 }
