@@ -24,15 +24,25 @@ type ServerConfig struct {
 }
 
 type ListenerConfig struct {
-	BindAddress            string `yaml:"bind-address"`
+	BindAddress    string `yaml:"bind-address"`
+	FallbackConfig `yaml:",inline"`
+}
+
+type FallbackConfig struct {
 	SshFallbackAddress     string `yaml:"ssh-fallback-address"`
 	SshFallbackTimeout     int    `yaml:"ssh-fallback-timeout"`
-	TLSFallbackAddress     string `yaml:"tls-fallback-address"`
+	TLSFallbackAddress     string `yaml:"tls-fallback-address"` // old compatibility
 	WSFallbackAddress      string `yaml:"ws-fallback-address"`
 	UnknownFallbackAddress string `yaml:"unknown-fallback-address"`
 
+	TLSFallback   []TLSFallbackConfig   `yaml:"tls-fallback"`
 	SSFallback    []SSFallbackConfig    `yaml:"ss-fallback"`
 	VmessFallback []VmessFallbackConfig `yaml:"vmess-fallback"`
+}
+
+type TLSFallbackConfig struct {
+	SNI     string `yaml:"sni"`
+	Address string `yaml:"address"`
 }
 
 type SSFallbackConfig struct {

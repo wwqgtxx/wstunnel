@@ -35,12 +35,20 @@ func (t *Tester) Add(name, method, password string, clientImpl common.ClientImpl
 }
 
 func (t *Tester) Test(peeker peek.Peeker, cb func(name string, clientImpl common.ClientImpl)) (bool, error) {
+	var err error
+	var lastPeekBuf []byte
+	var lastPeekLen int
 	for _, pair := range t.Lists {
 		name, method, clientImpl := pair.Name, pair.Method, pair.ClientImpl
-		header, err := peeker.Peek(method.keySaltLength + PacketLengthBufferSize + Overhead)
-		if err != nil {
-			return false, err
+		peekLen := method.keySaltLength + PacketLengthBufferSize + Overhead
+		if lastPeekLen != peekLen {
+			lastPeekLen = peekLen
+			lastPeekBuf, err = peeker.Peek(peekLen)
+			if err != nil {
+				return false, err
+			}
 		}
+		header := lastPeekBuf
 		key := make([]byte, method.keySaltLength)
 		_, err = Kdf(method.key, header[:method.keySaltLength], key)
 		if err != nil {

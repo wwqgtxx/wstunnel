@@ -13,6 +13,9 @@ func NewPeekConn(conn net.Conn) Conn {
 	if err != nil {
 		return NewBufferedConn(conn)
 	}
+	if pc, ok := conn.(*peekConn); ok {
+		return pc
+	}
 	return &peekConn{
 		Conn: conn,
 		rc:   rc,

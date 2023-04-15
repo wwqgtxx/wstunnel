@@ -7,6 +7,7 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/fallback"
 	"github.com/wwqgtxx/wstunnel/listener"
 	"github.com/wwqgtxx/wstunnel/tunnel"
 	"github.com/wwqgtxx/wstunnel/utils"
@@ -171,7 +172,7 @@ func BuildServer(serverConfig config.ServerConfig) {
 				proxyConfig = *target.ProxyConfig
 			}
 			sh = &serverHandler{
-				ClientImpl:  listener.NewClientImpl(config.ClientConfig{TargetAddress: target.TargetAddress, ProxyConfig: proxyConfig}),
+				ClientImpl:  fallback.NewClientImpl(config.ClientConfig{TargetAddress: target.TargetAddress, ProxyConfig: proxyConfig}),
 				DestAddress: target.TargetAddress,
 				IsInternal:  false,
 			}

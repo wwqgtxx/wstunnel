@@ -13,6 +13,7 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/fallback"
 	"github.com/wwqgtxx/wstunnel/listener"
 	"github.com/wwqgtxx/wstunnel/tunnel"
 	"github.com/wwqgtxx/wstunnel/utils"
@@ -384,5 +385,5 @@ func StartClients() {
 }
 
 func init() {
-	listener.NewClientImpl = NewClientImpl
+	fallback.NewClientImpl = NewClientImpl
 }
