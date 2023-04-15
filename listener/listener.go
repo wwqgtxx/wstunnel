@@ -12,6 +12,8 @@ import (
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/peek"
+	"github.com/wwqgtxx/wstunnel/tester/ssaead"
+	"github.com/wwqgtxx/wstunnel/tester/vmessaead"
 	"github.com/wwqgtxx/wstunnel/utils"
 
 	"github.com/sagernet/tfo-go"
@@ -43,6 +45,8 @@ type tcpListener struct {
 	tlsClientImpl       common.ClientImpl
 	wsClientImpl        common.ClientImpl
 	unknownClientImpl   common.ClientImpl
+	ssTester            *ssaead.Tester
+	vmessTester         *vmessaead.Tester
 	isWebSocketListener bool
 }
 
@@ -104,8 +108,7 @@ func (l *tcpListener) loop() {
 				_ = conn.SetReadDeadline(time.Time{})
 				l.ch <- acceptResult{conn: conn, err: err}
 			}
-
-			if err != nil {
+			onError := func(err error) {
 				if l.sshClientImpl != nil && errors.Is(err, os.ErrDeadlineExceeded) { // some client wait SSH server send handshake first (eg: motty).
 					tunnel(l.sshClientImpl, "SSH", true)
 					return
@@ -113,7 +116,10 @@ func (l *tcpListener) loop() {
 				log.Println(err)
 				return
 			}
-			ws := false
+
+			if err != nil {
+				onError(err)
+			}
 			bufString := string(buf)
 			//log.Println(bufString)
 			switch bufString {
@@ -133,16 +139,38 @@ func (l *tcpListener) loop() {
 					tunnel(l.wsClientImpl, "WebSocket", false)
 					return
 				}
-				ws = true
-			}
-			if l.unknownClientImpl != nil {
-				if l.isWebSocketListener && ws {
+				if l.isWebSocketListener {
 					accept()
 					return
-				} else {
-					tunnel(l.unknownClientImpl, "Unknown", false)
+				}
+			}
+			if l.vmessTester != nil { // peek size == 16
+				ok, err := l.vmessTester.Test(conn, func(name string, clientImpl common.ClientImpl) {
+					tunnel(clientImpl, fmt.Sprintf("VMESS[%s]", name), false)
+				})
+				if err != nil {
+					onError(err)
 					return
 				}
+				if ok {
+					return
+				}
+			}
+			if l.ssTester != nil { // peek size == (16/24/32) + 2 + 16
+				ok, err := l.ssTester.Test(conn, func(name string, clientImpl common.ClientImpl) {
+					tunnel(clientImpl, fmt.Sprintf("SS[%s]", name), false)
+				})
+				if err != nil {
+					onError(err)
+					return
+				}
+				if ok {
+					return
+				}
+			}
+			if l.unknownClientImpl != nil {
+				tunnel(l.unknownClientImpl, "Unknown", false)
+				return
 			}
 			accept()
 		}()
@@ -158,6 +186,8 @@ func ListenTcp(listenerConfig Config) (net.Listener, error) {
 	var tlsClientImpl common.ClientImpl
 	var wsClientImpl common.ClientImpl
 	var unknownClientImpl common.ClientImpl
+	var ssTester *ssaead.Tester
+	var vmessTester *vmessaead.Tester
 	if len(listenerConfig.SshFallbackAddress) > 0 {
 		sshClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.SshFallbackAddress, ProxyConfig: listenerConfig.ProxyConfig})
 	}
@@ -170,6 +200,33 @@ func ListenTcp(listenerConfig Config) (net.Listener, error) {
 	if len(listenerConfig.UnknownFallbackAddress) > 0 {
 		unknownClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: listenerConfig.UnknownFallbackAddress, ProxyConfig: listenerConfig.ProxyConfig})
 	}
+	if len(listenerConfig.SSFallback) > 0 {
+		ssTester = ssaead.NewTester()
+		for _, ssFallbackConfig := range listenerConfig.SSFallback {
+			err = ssTester.Add(
+				ssFallbackConfig.Name,
+				ssFallbackConfig.Method,
+				ssFallbackConfig.Password,
+				NewClientImpl(config.ClientConfig{TargetAddress: ssFallbackConfig.Address, ProxyConfig: listenerConfig.ProxyConfig}),
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+	if len(listenerConfig.VmessFallback) > 0 {
+		vmessTester = vmessaead.NewTester()
+		for _, vmessFallbackConfig := range listenerConfig.VmessFallback {
+			err = vmessTester.Add(
+				vmessFallbackConfig.Name,
+				vmessFallbackConfig.UUID,
+				NewClientImpl(config.ClientConfig{TargetAddress: vmessFallbackConfig.Address, ProxyConfig: listenerConfig.ProxyConfig}),
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if tlsClientImpl != nil || sshClientImpl != nil || wsClientImpl != nil || unknownClientImpl != nil {
 		ln := &tcpListener{
 			Listener:            netLn,
@@ -178,6 +235,8 @@ func ListenTcp(listenerConfig Config) (net.Listener, error) {
 			tlsClientImpl:       tlsClientImpl,
 			wsClientImpl:        wsClientImpl,
 			unknownClientImpl:   unknownClientImpl,
+			ssTester:            ssTester,
+			vmessTester:         vmessTester,
 			isWebSocketListener: listenerConfig.IsWebSocketListener,
 			ch:                  make(chan acceptResult),
 		}

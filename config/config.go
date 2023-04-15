@@ -30,6 +30,22 @@ type ListenerConfig struct {
 	TLSFallbackAddress     string `yaml:"tls-fallback-address"`
 	WSFallbackAddress      string `yaml:"ws-fallback-address"`
 	UnknownFallbackAddress string `yaml:"unknown-fallback-address"`
+
+	SSFallback    []SSFallbackConfig    `yaml:"ss-fallback"`
+	VmessFallback []VmessFallbackConfig `yaml:"vmess-fallback"`
+}
+
+type SSFallbackConfig struct {
+	Name     string `yaml:"name"`
+	Method   string `yaml:"method"`
+	Password string `yaml:"password"`
+	Address  string `yaml:"address"`
+}
+
+type VmessFallbackConfig struct {
+	Name    string `yaml:"name"`
+	UUID    string `yaml:"uuid"`
+	Address string `yaml:"address"`
 }
 
 type ProxyConfig struct {
