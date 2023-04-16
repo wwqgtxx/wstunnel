@@ -47,3 +47,25 @@ func (c *BufferedConn) Buffered() int {
 func (c *BufferedConn) WriteTo(w io.Writer) (n int64, err error) {
 	return c.r.WriteTo(w)
 }
+
+func (c *BufferedConn) ReaderReplaceable() bool {
+	if c.r.Buffered() > 0 {
+		return false
+	}
+	return true
+}
+
+func (c *BufferedConn) ToReader() io.Reader {
+	if c.r.Buffered() > 0 {
+		return c
+	}
+	return c.Conn
+}
+
+func (c *BufferedConn) WriterReplaceable() bool {
+	return true
+}
+
+func (c *BufferedConn) ToWriter() io.Writer {
+	return c.Conn
+}

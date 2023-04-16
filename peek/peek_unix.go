@@ -9,25 +9,24 @@ import (
 )
 
 func NewPeekConn(conn net.Conn) Conn {
+	if pc, ok := conn.(Conn); ok {
+		return pc
+	}
 	rc, err := conn.(syscall.Conn).SyscallConn()
 	if err != nil {
 		return NewBufferedConn(conn)
 	}
-	if pc, ok := conn.(*peekConn); ok {
-		return pc
-	}
 	return &peekConn{
 		Conn: conn,
-		rc:   rc,
+		peek: peek{rc},
 	}
 }
 
-type peekConn struct {
-	net.Conn
+type peek struct {
 	rc syscall.RawConn
 }
 
-func (c *peekConn) Peek(n int) ([]byte, error) {
+func (c *peek) Peek(n int) ([]byte, error) {
 	var sysErr error = nil
 	buf := make([]byte, n)
 	err := c.rc.Read(func(fd uintptr) bool {
@@ -47,4 +46,25 @@ func (c *peekConn) Peek(n int) ([]byte, error) {
 		return nil, err
 	}
 	return buf, sysErr
+}
+
+type peekConn struct {
+	net.Conn
+	peek
+}
+
+func (c *peekConn) ReaderReplaceable() bool {
+	return true
+}
+
+func (c *peekConn) ToReader() io.Reader {
+	return c.Conn
+}
+
+func (c *peekConn) WriterReplaceable() bool {
+	return true
+}
+
+func (c *peekConn) ToWriter() io.Writer {
+	return c.Conn
 }

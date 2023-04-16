@@ -7,6 +7,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/wwqgtxx/wstunnel/peek"
+
 	"github.com/gorilla/websocket"
 )
 
@@ -100,7 +102,7 @@ func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 	exit := make(chan struct{}, 1)
 
 	go func() {
-		_, err := io.Copy(tcp1, tcp2)
+		_, err := io.Copy(peek.ToWriter(tcp1), peek.ToReader(tcp2))
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
@@ -108,7 +110,7 @@ func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 		exit <- struct{}{}
 	}()
 
-	_, err := io.Copy(tcp2, tcp1)
+	_, err := io.Copy(peek.ToWriter(tcp2), peek.ToReader(tcp1))
 	if err != nil && err == io.EOF {
 		log.Println(err)
 	}
@@ -118,8 +120,11 @@ func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 }
 
 func setKeepAlive(c net.Conn) {
-	if tcp, ok := c.(*net.TCPConn); ok {
-		_ = tcp.SetKeepAlive(true)
-		_ = tcp.SetKeepAlivePeriod(30 * time.Second)
+	writer := peek.ToWriter(c) // writer is always the underlying conn in peek.Conn
+	if conn, ok := writer.(interface{ SetKeepAlive(keepalive bool) error }); ok {
+		_ = conn.SetKeepAlive(true)
+	}
+	if conn, ok := writer.(interface{ SetKeepAlivePeriod(d time.Duration) error }); ok {
+		_ = conn.SetKeepAlivePeriod(30 * time.Second)
 	}
 }
