@@ -9,6 +9,7 @@ import (
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/fallback"
 	"github.com/wwqgtxx/wstunnel/listener"
+	"github.com/wwqgtxx/wstunnel/peek/peekws"
 	"github.com/wwqgtxx/wstunnel/tunnel"
 	"github.com/wwqgtxx/wstunnel/utils"
 
@@ -67,6 +68,7 @@ type ServerHandler http.Handler
 type serverHandler struct {
 	common.ClientImpl
 	DestAddress string
+	Fallback    *fallback.Fallback
 	IsInternal  bool
 }
 
@@ -86,14 +88,35 @@ func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	edBuf, responseHeader := utils.DecodeXray0rtt(r.Header)
+
+	if s.Fallback != nil {
+		ws, err := upgrader.Upgrade(w, r, responseHeader)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		defer ws.Close()
+		conn := peekws.New(ws, ws.RemoteAddr())
+		if s.Fallback.Handle(conn, edBuf, responseHeader) {
+			return
+		}
+		// send inHeader to client for Xray's 0rtt ws
+		target, err := s.Dial(edBuf, responseHeader)
+		if err != nil {
+			log.Println(err)
+			return
+		}
+		defer target.Close()
+		target.TunnelTcp(conn)
+	}
+
 	ch := make(chan common.ClientConn)
 	defer func() {
 		if i, ok := <-ch; ok {
 			i.Close()
 		}
 	}()
-
-	edBuf, responseHeader := utils.DecodeXray0rtt(r.Header)
 
 	go func() {
 		defer close(ch)
@@ -161,10 +184,17 @@ func BuildServer(serverConfig config.ServerConfig) {
 				") to (",
 				target.WSPath, "<->", _client.Target(), _client.Proxy(),
 				")")
+			listenerConfig := _client.GetListenerConfig().(listener.Config)
+			fb, _ := fallback.NewFallback(fallback.Config{
+				FallbackConfig:      listenerConfig.FallbackConfig,
+				ProxyConfig:         listenerConfig.ProxyConfig,
+				IsWebSocketListener: false,
+			})
 			sh = &serverHandler{
 				ClientImpl:  _client.GetClientImpl(),
 				DestAddress: target.TargetAddress,
 				IsInternal:  true,
+				Fallback:    fb,
 			}
 		} else {
 			proxyConfig := serverConfig.ProxyConfig

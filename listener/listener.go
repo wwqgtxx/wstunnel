@@ -61,7 +61,7 @@ func (l *tcpListener) loop() {
 		}
 		go func() {
 			conn := peek.NewPeekConn(conn)
-			if l.fallback.Handle(conn) {
+			if l.fallback.Handle(conn, nil, nil) {
 				return
 			}
 			select {

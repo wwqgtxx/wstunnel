@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
-	"os"
+	"net/http"
 	"time"
 
 	"github.com/wwqgtxx/wstunnel/common"
@@ -41,7 +41,7 @@ type Fallback struct {
 	isWebSocketListener bool
 }
 
-func (f *Fallback) Handle(conn peek.Conn) bool {
+func (f *Fallback) Handle(conn peek.Conn, edBuf []byte, inHeader http.Header) bool {
 	if f == nil {
 		return false
 	}
@@ -59,7 +59,7 @@ func (f *Fallback) Handle(conn peek.Conn) bool {
 		defer func() {
 			_ = conn.Close()
 		}()
-		conn2, err := clientImpl.Dial(nil, nil)
+		conn2, err := clientImpl.Dial(edBuf, inHeader)
 		if err != nil {
 			log.Println(err)
 			return false
@@ -74,12 +74,11 @@ func (f *Fallback) Handle(conn peek.Conn) bool {
 	}
 
 	if err != nil {
-		if f.sshClientImpl != nil && errors.Is(err, os.ErrDeadlineExceeded) { // some client wait SSH server send handshake first (eg: motty).
-			tunnel(f.sshClientImpl, "SSH", true)
-			return true
+		if f.sshClientImpl != nil && IsTimeout(err) { // some client wait SSH server send handshake first (eg: motty).
+			return tunnel(f.sshClientImpl, "SSH", true)
 		}
 		log.Println(err)
-		return false
+		return accept()
 	}
 	bufString := string(buf)
 	//log.Println(bufString)
@@ -101,9 +100,9 @@ func (f *Fallback) Handle(conn peek.Conn) bool {
 		ok, err = f.tlsTester.Test(conn, func(name string, clientImpl common.ClientImpl) {
 			tunnel(clientImpl, fmt.Sprintf("TLS[%s]", name), false)
 		})
-		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+		if err != nil && !IsTimeout(err) {
 			log.Println(err)
-			return false
+			return accept()
 		}
 		if ok {
 			return true
@@ -113,9 +112,9 @@ func (f *Fallback) Handle(conn peek.Conn) bool {
 		ok, err = f.vmessTester.Test(conn, func(name string, clientImpl common.ClientImpl) {
 			tunnel(clientImpl, fmt.Sprintf("VMESS[%s]", name), false)
 		})
-		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+		if err != nil && !IsTimeout(err) {
 			log.Println(err)
-			return false
+			return accept()
 		}
 		if ok {
 			return true
@@ -125,9 +124,9 @@ func (f *Fallback) Handle(conn peek.Conn) bool {
 		ok, err = f.ssTester.Test(conn, func(name string, clientImpl common.ClientImpl) {
 			tunnel(clientImpl, fmt.Sprintf("SS[%s]", name), false)
 		})
-		if err != nil && !errors.Is(err, os.ErrDeadlineExceeded) {
+		if err != nil && !IsTimeout(err) {
 			log.Println(err)
-			return false
+			return accept()
 		}
 		if ok {
 			return true
@@ -215,4 +214,17 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 		return f, nil
 	}
 	return nil, nil
+}
+
+type TimeoutError interface {
+	Timeout() bool
+}
+
+func IsTimeout(err error) bool {
+	// gorilla/websocket has a hideTempErr() os we can't use errors.Is(err, os.ErrDeadlineExceeded)
+	var t TimeoutError
+	if errors.As(err, &t) && t.Timeout() {
+		return true
+	}
+	return false
 }
