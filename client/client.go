@@ -234,6 +234,7 @@ func BuildClient(clientConfig config.ClientConfig) {
 	_, port, err := net.SplitHostPort(clientConfig.BindAddress)
 	if err != nil {
 		log.Println(err)
+		return
 	}
 
 	serverWSPath := strings.ReplaceAll(clientConfig.ServerWSPath, "{port}", port)

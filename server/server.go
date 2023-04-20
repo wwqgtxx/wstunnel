@@ -175,6 +175,7 @@ func BuildServer(serverConfig config.ServerConfig) {
 		host, port, err := net.SplitHostPort(target.TargetAddress)
 		if err != nil {
 			log.Println(err)
+			continue
 		}
 		var sh ServerHandler
 		_client, ok := common.PortToClient[port]
@@ -227,6 +228,7 @@ func BuildServer(serverConfig config.ServerConfig) {
 	_, port, err := net.SplitHostPort(serverConfig.BindAddress)
 	if err != nil {
 		log.Println(err)
+		return
 	}
 	common.PortToServer[port] = s
 }

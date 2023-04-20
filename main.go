@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/wwqgtxx/wstunnel/udp"
 	"log"
 	"os"
 	"os/signal"
@@ -36,11 +37,17 @@ func main() {
 	for _, serverConfig := range cfg.ServerConfigs {
 		server.BuildServer(serverConfig)
 	}
+	for _, udpConfig := range cfg.UdpConfigs {
+		udp.BuildUdp(udpConfig)
+	}
 	if !cfg.DisableClient {
 		client.StartClients()
 	}
 	if !cfg.DisableServer {
 		server.StartServers()
+	}
+	if !cfg.DisableUdp {
+		udp.StartUdps()
 	}
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)

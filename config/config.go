@@ -23,6 +23,12 @@ type ServerConfig struct {
 	Target         []ServerTargetConfig `yaml:"target"`
 }
 
+type UdpConfig struct {
+	ListenerConfig `yaml:",inline"`
+	TargetAddress  string  `yaml:"target-address"`
+	Reserved       []uint8 `yaml:"reserved"`
+}
+
 type ListenerConfig struct {
 	BindAddress    string `yaml:"bind-address"`
 	FallbackConfig `yaml:",inline"`
@@ -71,8 +77,10 @@ type ServerTargetConfig struct {
 type Config struct {
 	ServerConfigs []ServerConfig `yaml:"server"`
 	ClientConfigs []ClientConfig `yaml:"client"`
+	UdpConfigs    []UdpConfig    `yaml:"udp"`
 	DisableServer bool           `yaml:"disable-server"`
 	DisableClient bool           `yaml:"disable-client"`
+	DisableUdp    bool           `yaml:"disable-udp"`
 }
 
 func ReadConfig(path string) ([]byte, error) {
@@ -95,8 +103,10 @@ func ParseConfig(buf []byte) (*Config, error) {
 	cfg := &Config{
 		ServerConfigs: []ServerConfig{},
 		ClientConfigs: []ClientConfig{},
+		UdpConfigs:    []UdpConfig{},
 		DisableServer: false,
 		DisableClient: false,
+		DisableUdp:    false,
 	}
 	if err := yaml.Unmarshal(buf, &cfg); err != nil {
 		return nil, err
