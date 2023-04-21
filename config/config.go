@@ -32,6 +32,7 @@ type UdpConfig struct {
 type ListenerConfig struct {
 	BindAddress    string `yaml:"bind-address"`
 	FallbackConfig `yaml:",inline"`
+	MMsg           bool `yaml:"mmsg"`
 }
 
 type FallbackConfig struct {
