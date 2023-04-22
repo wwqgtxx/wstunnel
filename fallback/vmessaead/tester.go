@@ -6,32 +6,31 @@ import (
 	"encoding/binary"
 	"hash/crc32"
 
-	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/peek"
 
 	"github.com/gofrs/uuid/v5"
 )
 
-type Pair struct {
-	Name       string
-	Block      cipher.Block
-	ClientImpl common.ClientImpl
+type Pair[T any] struct {
+	Name  string
+	Block cipher.Block
+	Val   T
 }
 
-type Tester struct {
-	Lists []Pair
+type Tester[T any] struct {
+	Lists []Pair[T]
 }
 
-func NewTester() *Tester {
-	return &Tester{}
+func NewTester[T any]() *Tester[T] {
+	return &Tester[T]{}
 }
 
 const (
 	AuthIdSize = 16
 )
 
-func (t *Tester) Add(name, userId string, clientImpl common.ClientImpl) (err error) {
-	pair := Pair{Name: name, ClientImpl: clientImpl}
+func (t *Tester[T]) Add(name, userId string, val T) (err error) {
+	pair := Pair[T]{Name: name, Val: val}
 	userUUID := uuid.FromStringOrNil(userId)
 	if userUUID == uuid.Nil {
 		userUUID = uuid.NewV5(userUUID, userId)
@@ -49,7 +48,7 @@ func (t *Tester) Add(name, userId string, clientImpl common.ClientImpl) (err err
 	return
 }
 
-func (t *Tester) Test(peeker peek.Peeker, cb func(Name string, clientImpl common.ClientImpl)) (bool, error) {
+func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool, error) {
 	header, err := peeker.Peek(AuthIdSize)
 	if err != nil {
 		return false, err
@@ -58,13 +57,13 @@ func (t *Tester) Test(peeker peek.Peeker, cb func(Name string, clientImpl common
 	authId := header[:AuthIdSize]
 	var decodedId [AuthIdSize]byte
 	for _, pair := range t.Lists {
-		name, userIdBlock, clientImpl := pair.Name, pair.Block, pair.ClientImpl
+		name, userIdBlock, val := pair.Name, pair.Block, pair.Val
 		userIdBlock.Decrypt(decodedId[:], authId)
 		checksum := binary.BigEndian.Uint32(decodedId[12:])
 		if crc32.ChecksumIEEE(decodedId[:12]) != checksum {
 			continue
 		}
-		cb(name, clientImpl)
+		cb(name, val)
 		return true, nil
 	}
 	return false, nil

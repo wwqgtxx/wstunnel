@@ -1,6 +1,7 @@
 package udp
 
 import (
+	"fmt"
 	"golang.org/x/exp/slices"
 	"golang.org/x/net/ipv4"
 	"log"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/fallback/ssaead"
 )
 
 const BufferSize = 16 * 1024
@@ -34,6 +36,7 @@ type StdTunnel struct {
 	address  string
 	target   string
 	reserved []byte
+	ssTester *ssaead.Tester[string]
 }
 
 func NewStdTunnel(udpConfig config.UdpConfig) Tunnel {
@@ -41,6 +44,21 @@ func NewStdTunnel(udpConfig config.UdpConfig) Tunnel {
 		address:  udpConfig.BindAddress,
 		target:   udpConfig.TargetAddress,
 		reserved: slices.Clone(udpConfig.Reserved),
+	}
+	var err error
+	if len(udpConfig.SSFallback) > 0 {
+		t.ssTester = ssaead.NewTester[string]()
+		for _, ssFallbackConfig := range udpConfig.SSFallback {
+			err = t.ssTester.Add(
+				ssFallbackConfig.Name,
+				ssFallbackConfig.Method,
+				ssFallbackConfig.Password,
+				ssFallbackConfig.Address,
+			)
+			if err != nil {
+				log.Println(err)
+			}
+		}
 	}
 	return t
 }
@@ -68,14 +86,22 @@ func (t *StdTunnel) Handle() {
 			mapItem.Mutex.Lock()
 			remoteConn := mapItem.Conn
 			if remoteConn == nil {
-				log.Println("Dial to", t.target, "for", addr)
-				remoteConn, err = net.Dial("udp", t.target)
+				target := t.target
+				addition := ""
+				if t.ssTester != nil {
+					if ok, name, newTarget := t.ssTester.TestPacket(buf[:n]); ok {
+						addition = fmt.Sprintf("SS[%s]", name)
+						target = newTarget
+					}
+				}
+				log.Println("Dial", addition, "to", target, "for", addr)
+				remoteConn, err = net.Dial("udp", target)
 				if err != nil {
 					mapItem.Mutex.Unlock()
 					log.Println(err)
 					return
 				}
-				log.Println("Associate from", addr, "to", remoteConn.RemoteAddr(), "by", remoteConn.LocalAddr())
+				log.Println("Associate", addition, "from", addr, "to", remoteConn.RemoteAddr(), "by", remoteConn.LocalAddr())
 				mapItem.Conn = remoteConn
 				go func() {
 					for {

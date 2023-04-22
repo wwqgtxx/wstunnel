@@ -35,9 +35,9 @@ type Fallback struct {
 	sshFallbackTimeout  time.Duration
 	wsClientImpl        common.ClientImpl
 	unknownClientImpl   common.ClientImpl
-	tlsTester           *tls.Tester
-	ssTester            *ssaead.Tester
-	vmessTester         *vmessaead.Tester
+	tlsTester           *tls.Tester[common.ClientImpl]
+	ssTester            *ssaead.Tester[common.ClientImpl]
+	vmessTester         *vmessaead.Tester[common.ClientImpl]
 	isWebSocketListener bool
 }
 
@@ -143,9 +143,9 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	var sshClientImpl common.ClientImpl
 	var wsClientImpl common.ClientImpl
 	var unknownClientImpl common.ClientImpl
-	var tlsTester *tls.Tester
-	var ssTester *ssaead.Tester
-	var vmessTester *vmessaead.Tester
+	var tlsTester *tls.Tester[common.ClientImpl]
+	var ssTester *ssaead.Tester[common.ClientImpl]
+	var vmessTester *vmessaead.Tester[common.ClientImpl]
 	if len(fallbackConfig.SshFallbackAddress) > 0 {
 		sshClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.SshFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
 	}
@@ -162,7 +162,7 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 		})
 	}
 	if len(fallbackConfig.TLSFallback) > 0 {
-		tlsTester = tls.NewTester()
+		tlsTester = tls.NewTester[common.ClientImpl]()
 		for _, tlsFallbackConfig := range fallbackConfig.TLSFallback {
 			err = tlsTester.Add(
 				tlsFallbackConfig.SNI,
@@ -174,7 +174,7 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 		}
 	}
 	if len(fallbackConfig.SSFallback) > 0 {
-		ssTester = ssaead.NewTester()
+		ssTester = ssaead.NewTester[common.ClientImpl]()
 		for _, ssFallbackConfig := range fallbackConfig.SSFallback {
 			err = ssTester.Add(
 				ssFallbackConfig.Name,
@@ -188,7 +188,7 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 		}
 	}
 	if len(fallbackConfig.VmessFallback) > 0 {
-		vmessTester = vmessaead.NewTester()
+		vmessTester = vmessaead.NewTester[common.ClientImpl]()
 		for _, vmessFallbackConfig := range fallbackConfig.VmessFallback {
 			err = vmessTester.Add(
 				vmessFallbackConfig.Name,

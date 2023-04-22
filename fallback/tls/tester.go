@@ -9,33 +9,32 @@ import (
 	"net"
 	"time"
 
-	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/peek"
 )
 
-type Pair struct {
-	Name       string
-	ClientImpl common.ClientImpl
+type Pair[T any] struct {
+	Name string
+	Val  T
 }
 
-type Tester struct {
-	Map map[string]common.ClientImpl
+type Tester[T any] struct {
+	Map map[string]T
 }
 
-func NewTester() *Tester {
-	return &Tester{Map: make(map[string]common.ClientImpl)}
+func NewTester[T any]() *Tester[T] {
+	return &Tester[T]{Map: make(map[string]T)}
 }
 
 var (
 	StartBytes = [3]byte{0x16, 0x03, 0x01} // TLS1.0 Handshake (works on TLS1.0, 1.1, 1.2, 1.3)
 )
 
-func (t *Tester) Add(name string, clientImpl common.ClientImpl) (err error) {
-	t.Map[name] = clientImpl
+func (t *Tester[T]) Add(name string, val T) (err error) {
+	t.Map[name] = val
 	return
 }
 
-func (t *Tester) Test(peeker peek.Peeker, cb func(Name string, clientImpl common.ClientImpl)) (bool, error) {
+func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool, error) {
 	const recordHeaderLen = 5
 	hdr, err := peeker.Peek(recordHeaderLen)
 	if err != nil {
@@ -58,12 +57,12 @@ func (t *Tester) Test(peeker peek.Peeker, cb func(Name string, clientImpl common
 		},
 	}).Handshake()
 
-	if clientImpl, ok := t.Map[sni]; ok {
-		cb(sni, clientImpl)
+	if val, ok := t.Map[sni]; ok {
+		cb(sni, val)
 		return true, nil
 	}
-	if clientImpl, ok := t.Map[""]; ok {
-		cb(sni, clientImpl)
+	if val, ok := t.Map[""]; ok {
+		cb(sni, val)
 		return true, nil
 	}
 	return false, nil
