@@ -1,12 +1,14 @@
 package udp
 
 import (
-	"github.com/wwqgtxx/wstunnel/config"
 	"log"
 	"net"
+	"time"
+
+	"github.com/wwqgtxx/wstunnel/config"
 )
 
-const MaxUdpAge = 5 * 60
+const MaxUdpAge = 5 * time.Minute
 
 type Tunnel interface {
 	Handle()

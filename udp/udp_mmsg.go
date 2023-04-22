@@ -7,9 +7,9 @@ import (
 	"log"
 	"net"
 	"sync"
+	"time"
 
 	"github.com/wwqgtxx/wstunnel/config"
-	cache "github.com/wwqgtxx/wstunnel/utils/lrucache"
 )
 
 const (
@@ -40,35 +40,21 @@ var WriteMsgsBufPool = sync.Pool{New: func() any {
 // This means we can use this struct to read from a socket that receives both IPv4 and IPv6 messages.
 var _ ipv4.Message = ipv6.Message{}
 
-type MmsgNatItem struct {
+type MmsgMapItem struct {
 	net.Conn
 	*ipv4.PacketConn
 	sync.Mutex
 }
 
 type MmsgTunnel struct {
-	nat      *cache.LruCache[string, *MmsgNatItem]
+	connMap  sync.Map
 	address  string
 	target   string
 	reserved []byte
 }
 
 func NewMmsgTunnel(udpConfig config.UdpConfig) Tunnel {
-	nat := cache.New[string, *MmsgNatItem](
-		cache.WithAge[string, *MmsgNatItem](MaxUdpAge),
-		cache.WithUpdateAgeOnGet[string, *MmsgNatItem](),
-		cache.WithEvict[string, *MmsgNatItem](func(key string, value *MmsgNatItem) {
-			if conn := value.Conn; conn != nil {
-				log.Println("Delete", conn.LocalAddr(), "for", key, "to", conn.RemoteAddr())
-				_ = conn.Close()
-			}
-		}),
-		cache.WithCreate[string, *MmsgNatItem](func(key string) *MmsgNatItem {
-			return &MmsgNatItem{}
-		}),
-	)
 	t := &MmsgTunnel{
-		nat:      nat,
 		address:  udpConfig.BindAddress,
 		target:   udpConfig.TargetAddress,
 		reserved: slices.Clone(udpConfig.Reserved),
@@ -141,22 +127,23 @@ func (t *MmsgTunnel) Handle() {
 					}
 					WriteMsgsBufPool.Put(wMsgs)
 				}()
-				natItem, _ := t.nat.Get(addr)
-				natItem.Mutex.Lock()
-				remoteConn := natItem.Conn
-				remotePacketConn := natItem.PacketConn
+				v, _ := t.connMap.LoadOrStore(addr, &MmsgMapItem{})
+				mapItem := v.(*MmsgMapItem)
+				mapItem.Mutex.Lock()
+				remoteConn := mapItem.Conn
+				remotePacketConn := mapItem.PacketConn
 				if remoteConn == nil || remotePacketConn == nil {
 					log.Println("Dial to", t.target, "for", addr)
 					remoteConn, err = net.Dial("udp", t.target)
 					if err != nil {
-						natItem.Mutex.Unlock()
+						mapItem.Mutex.Unlock()
 						log.Println(err)
 						return
 					}
 					log.Println("Associate from", addr, "to", remoteConn.RemoteAddr(), "by", remoteConn.LocalAddr())
 					remotePacketConn = ipv4.NewPacketConn(remoteConn.(*net.UDPConn))
-					natItem.Conn = remoteConn
-					natItem.PacketConn = remotePacketConn
+					mapItem.Conn = remoteConn
+					mapItem.PacketConn = remotePacketConn
 					go func() {
 						rMsgs := ReadMsgsBufPool.Get().([]ipv4.Message)
 						wMsgs := WriteMsgsBufPool.Get().([]ipv4.Message)
@@ -165,10 +152,12 @@ func (t *MmsgTunnel) Handle() {
 							WriteMsgsBufPool.Put(wMsgs)
 						}()
 						for {
+							_ = remoteConn.SetReadDeadline(time.Now().Add(MaxUdpAge)) // set timeout
 							n, err := remotePacketConn.ReadBatch(rMsgs, 0)
 							if err != nil {
-								t.nat.Delete(addr) // it will call conn.Close() inside
-								log.Println(err)
+								t.connMap.Delete(addr)
+								log.Println("Delete and close", remoteConn.LocalAddr(), "for", addr, "to", remoteConn.RemoteAddr(), "because", err)
+								_ = remoteConn.Close()
 								return
 							}
 							for i := 0; i < n; i++ {
@@ -184,28 +173,23 @@ func (t *MmsgTunnel) Handle() {
 							wMsgsN := n
 							if wMsgsN == 1 { // maybe faster
 								_, err = udpConn.WriteTo(wMsgs[0].Buffers[0], nAddr)
-								if err != nil {
-									t.nat.Delete(addr) // it will call conn.Close() inside
-									log.Println(err)
-									return
-								}
 							} else {
 								var wN int
 								wN, err = packetConn.WriteBatch(wMsgs[:wMsgsN], 0)
-								if err != nil {
-									t.nat.Delete(addr) // it will call conn.Close() inside
-									log.Println(err)
-									return
-								}
-								if wN != wMsgsN {
+								if err == nil && wN != wMsgsN {
 									log.Println("warning wN=", wN, "wMsgsN=", wMsgsN)
 								}
 							}
-							t.nat.Get(addr) // refresh lru
+							if err != nil {
+								t.connMap.Delete(addr)
+								log.Println("Delete and close", remoteConn.LocalAddr(), "for", addr, "to", remoteConn.RemoteAddr(), "because", err)
+								_ = remoteConn.Close()
+								return
+							}
 						}
 					}()
 				}
-				natItem.Mutex.Unlock()
+				mapItem.Mutex.Unlock()
 
 				for _, wMsg := range wMsgs[:wMsgsN] {
 					buf := wMsg.Buffers[0]
@@ -217,21 +201,18 @@ func (t *MmsgTunnel) Handle() {
 
 				if wMsgsN == 1 { // maybe faster
 					_, err = remoteConn.Write(wMsgs[0].Buffers[0])
-					if err != nil {
-						log.Println(err)
-						return
-					}
 				} else {
 					var wN int
 					wN, err = remotePacketConn.WriteBatch(wMsgs[:wMsgsN], 0)
-					if err != nil {
-						log.Println(err)
-						return
-					}
-					if wN != wMsgsN {
+					if err == nil && wN != wMsgsN {
 						log.Println("warning wN=", wN, "wMsgsN=", wMsgsN)
 					}
 				}
+				if err != nil {
+					log.Println(err)
+					return
+				}
+				_ = remoteConn.SetReadDeadline(time.Now().Add(MaxUdpAge)) // refresh timeout
 
 			}()
 		}

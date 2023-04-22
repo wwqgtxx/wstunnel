@@ -5,11 +5,10 @@ import (
 	"golang.org/x/net/ipv4"
 	"log"
 	"net"
-	"net/netip"
 	"sync"
+	"time"
 
 	"github.com/wwqgtxx/wstunnel/config"
-	cache "github.com/wwqgtxx/wstunnel/utils/lrucache"
 )
 
 const BufferSize = 16 * 1024
@@ -24,35 +23,21 @@ func ListenUdp(network, address string) (*net.UDPConn, error) {
 	return pc.(*net.UDPConn), nil
 }
 
-type StdNatItem struct {
+type StdMapItem struct {
 	net.Conn
 	*ipv4.PacketConn
 	sync.Mutex
 }
 
 type StdTunnel struct {
-	nat      *cache.LruCache[netip.AddrPort, *StdNatItem]
+	connMap  sync.Map
 	address  string
 	target   string
 	reserved []byte
 }
 
 func NewStdTunnel(udpConfig config.UdpConfig) Tunnel {
-	nat := cache.New[netip.AddrPort, *StdNatItem](
-		cache.WithAge[netip.AddrPort, *StdNatItem](MaxUdpAge),
-		cache.WithUpdateAgeOnGet[netip.AddrPort, *StdNatItem](),
-		cache.WithEvict[netip.AddrPort, *StdNatItem](func(key netip.AddrPort, value *StdNatItem) {
-			if conn := value.Conn; conn != nil {
-				log.Println("Delete", conn.LocalAddr(), "for", key, "to", conn.RemoteAddr())
-				_ = conn.Close()
-			}
-		}),
-		cache.WithCreate[netip.AddrPort, *StdNatItem](func(key netip.AddrPort) *StdNatItem {
-			return &StdNatItem{}
-		}),
-	)
 	t := &StdTunnel{
-		nat:      nat,
 		address:  udpConfig.BindAddress,
 		target:   udpConfig.TargetAddress,
 		reserved: slices.Clone(udpConfig.Reserved),
@@ -78,27 +63,30 @@ func (t *StdTunnel) Handle() {
 		go func() {
 			defer BufPool.Put(buf)
 			var err error
-			natItem, _ := t.nat.Get(addr)
-			natItem.Mutex.Lock()
-			remoteConn := natItem.Conn
+			v, _ := t.connMap.LoadOrStore(addr, &StdMapItem{})
+			mapItem := v.(*StdMapItem)
+			mapItem.Mutex.Lock()
+			remoteConn := mapItem.Conn
 			if remoteConn == nil {
 				log.Println("Dial to", t.target, "for", addr)
 				remoteConn, err = net.Dial("udp", t.target)
 				if err != nil {
-					natItem.Mutex.Unlock()
+					mapItem.Mutex.Unlock()
 					log.Println(err)
 					return
 				}
 				log.Println("Associate from", addr, "to", remoteConn.RemoteAddr(), "by", remoteConn.LocalAddr())
-				natItem.Conn = remoteConn
+				mapItem.Conn = remoteConn
 				go func() {
 					for {
 						buf := BufPool.Get().([]byte)
+						_ = remoteConn.SetReadDeadline(time.Now().Add(MaxUdpAge)) // set timeout
 						n, err := remoteConn.Read(buf)
 						if err != nil {
 							BufPool.Put(buf)
-							t.nat.Delete(addr) // it will call remoteConn.Close() inside
-							log.Println(err)
+							t.connMap.Delete(addr)
+							log.Println("Delete and close", remoteConn.LocalAddr(), "for", addr, "to", remoteConn.RemoteAddr(), "because", err)
+							_ = remoteConn.Close()
 							return
 						}
 						if len(t.reserved) > 0 && n > len(t.reserved) { // wireguard reserved
@@ -109,15 +97,15 @@ func (t *StdTunnel) Handle() {
 						_, err = udpConn.WriteToUDPAddrPort(buf[:n], addr)
 						BufPool.Put(buf)
 						if err != nil {
-							t.nat.Delete(addr) // it will call remoteConn.Close() inside
-							log.Println(err)
+							t.connMap.Delete(addr)
+							log.Println("Delete and close", remoteConn.LocalAddr(), "for", addr, "to", remoteConn.RemoteAddr(), "because", err)
+							_ = remoteConn.Close()
 							return
 						}
-						t.nat.Get(addr) // refresh lru
 					}
 				}()
 			}
-			natItem.Mutex.Unlock()
+			mapItem.Mutex.Unlock()
 			if len(t.reserved) > 0 && n > len(t.reserved) { // wireguard reserved
 				copy(buf[1:], t.reserved)
 			}
@@ -126,6 +114,7 @@ func (t *StdTunnel) Handle() {
 				log.Println(err)
 				return
 			}
+			_ = remoteConn.SetReadDeadline(time.Now().Add(MaxUdpAge)) // refresh timeout
 		}()
 
 	}
