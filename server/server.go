@@ -97,7 +97,7 @@ func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		defer ws.Close()
-		conn := peekws.New(ws, ws.RemoteAddr())
+		conn := peekws.New(ws, ws.RemoteAddr(), edBuf)
 		if s.Fallback.Handle(conn, edBuf, responseHeader) {
 			return
 		}
