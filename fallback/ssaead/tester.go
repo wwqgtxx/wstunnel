@@ -58,9 +58,8 @@ func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool,
 			return false, err
 		}
 		lengthChunk := header[method.keySaltLength:]
-		nonce := make([]byte, readCipher.NonceSize())
 		length := make([]byte, PacketLengthBufferSize)
-		_, err = readCipher.Open(length[:0], nonce, lengthChunk, nil)
+		_, err = readCipher.Open(length[:0], peek.Zero[:readCipher.NonceSize()], lengthChunk, nil)
 		if err != nil {
 			continue
 		}
@@ -89,7 +88,7 @@ func (t *Tester[T]) TestPacket(packet []byte) (bool, string, T) {
 		}
 		_, err = readCipher.Open(
 			make([]byte, 0, len(packet)-Overhead),
-			make([]byte, readCipher.NonceSize()),
+			peek.Zero[:readCipher.NonceSize()],
 			packet[method.keySaltLength:],
 			nil,
 		)
