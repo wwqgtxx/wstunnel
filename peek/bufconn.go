@@ -44,6 +44,16 @@ func (c *BufferedConn) Buffered() int {
 	return c.r.Buffered()
 }
 
+func (c *BufferedConn) ReadCached() []byte {
+	if c.r.Buffered() > 0 {
+		length := c.r.Buffered()
+		b, _ := c.r.Peek(length)
+		_, _ = c.r.Discard(length)
+		return b
+	}
+	return nil
+}
+
 func (c *BufferedConn) WriteTo(w io.Writer) (n int64, err error) {
 	return c.r.WriteTo(w)
 }

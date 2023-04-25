@@ -43,3 +43,7 @@ func ToWriter(writer io.Writer) io.Writer {
 	}
 	return writer
 }
+
+type ReadCached interface {
+	ReadCached() []byte
+}

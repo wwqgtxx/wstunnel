@@ -5,9 +5,11 @@ import (
 	"log"
 	"net"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/wwqgtxx/wstunnel/peek"
+	"github.com/wwqgtxx/wstunnel/utils"
 
 	"github.com/gorilla/websocket"
 )
@@ -21,56 +23,6 @@ var (
 	WriteBufferPool = &sync.Pool{}
 )
 
-func fromTcpToWs(tcp net.Conn, ws *websocket.Conn) (err error) {
-	buf := BufPool.Get().([]byte)
-	for {
-		nBytes, err := tcp.Read(buf)
-		if err != nil {
-			break
-		}
-		err = ws.WriteMessage(websocket.BinaryMessage, buf[0:nBytes])
-		if err != nil {
-			break
-		}
-	}
-	BufPool.Put(buf)
-	return
-}
-
-func fromWsToTcp(ws *websocket.Conn, tcp net.Conn) (err error) {
-	var reader io.Reader
-
-	buf := BufPool.Get().([]byte)
-	for {
-		if reader == nil {
-			var msgType int
-			msgType, reader, err = ws.NextReader()
-			if err != nil {
-				break
-			}
-			if msgType != websocket.BinaryMessage && msgType != websocket.TextMessage {
-				log.Println("unknown msgType")
-			}
-		}
-		// _, err := io.CopyBuffer(tcp,reader,buf)
-		nBytes, err := reader.Read(buf)
-		if err == io.EOF {
-			reader = nil
-			err = nil
-			continue
-		}
-		if err != nil {
-			break
-		}
-		nBytes, err = tcp.Write(buf[0:nBytes])
-		if err != nil {
-			break
-		}
-	}
-	BufPool.Put(buf)
-	return
-}
-
 func TcpWs(tcp net.Conn, ws *websocket.Conn) {
 	setKeepAlive(tcp)
 	setKeepAlive(ws.UnderlyingConn())
@@ -78,7 +30,7 @@ func TcpWs(tcp net.Conn, ws *websocket.Conn) {
 	exit := make(chan struct{}, 1)
 
 	go func() {
-		err := fromTcpToWs(tcp, ws)
+		_, err := Copy(utils.NewWsWriter(ws), tcp)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
@@ -86,7 +38,7 @@ func TcpWs(tcp net.Conn, ws *websocket.Conn) {
 		exit <- struct{}{}
 	}()
 
-	err := fromWsToTcp(ws, tcp)
+	_, err := Copy(tcp, utils.NewWsReader(ws))
 	if err != nil && err == io.EOF {
 		log.Println(err)
 	}
@@ -102,7 +54,7 @@ func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 	exit := make(chan struct{}, 1)
 
 	go func() {
-		_, err := io.Copy(peek.ToWriter(tcp1), peek.ToReader(tcp2))
+		_, err := Copy(tcp1, tcp2)
 		if err != nil && err == io.EOF {
 			log.Println(err)
 		}
@@ -110,13 +62,57 @@ func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
 		exit <- struct{}{}
 	}()
 
-	_, err := io.Copy(peek.ToWriter(tcp2), peek.ToReader(tcp1))
+	_, err := Copy(tcp2, tcp1)
 	if err != nil && err == io.EOF {
 		log.Println(err)
 	}
 	_ = tcp2.SetReadDeadline(time.Now())
 
 	<-exit
+}
+
+func Copy(dst io.Writer, src io.Reader) (written int64, err error) {
+	dst = peek.ToWriter(dst)
+	for {
+		src = peek.ToReader(src)
+		if rc, ok := src.(peek.ReadCached); ok {
+			b := rc.ReadCached()
+			if len(b) > 0 {
+				var n int
+				n, err = dst.Write(b)
+				written += int64(n)
+				if err != nil {
+					return
+				}
+				continue
+			}
+		}
+		break
+	}
+	if srcSyscall, ok := src.(syscall.Conn); ok {
+		if srcRaw, sErr := srcSyscall.SyscallConn(); sErr == nil {
+			var handle bool
+			var n int64
+			if dstSyscall, ok := dst.(syscall.Conn); ok {
+				if dstRaw, sErr := dstSyscall.SyscallConn(); sErr == nil {
+					handle, n, err = splice(src, srcRaw, dst, dstRaw)
+					written += n
+					if handle {
+						return
+					}
+				}
+			}
+			handle, n, err = syscallCopy(src, srcRaw, dst)
+			written += n
+			if handle {
+				return
+			}
+		}
+	}
+	var n int64
+	n, err = stdCopy(dst, src)
+	written += n
+	return
 }
 
 func setKeepAlive(c net.Conn) {
