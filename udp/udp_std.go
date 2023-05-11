@@ -69,17 +69,16 @@ func (t *StdTunnel) Handle() {
 		log.Println(err)
 		return
 	}
+	enhanceUDPConn := NewEnhancePacketConn(udpConn)
 	for {
-		buf := BufPool.Get().([]byte)
-		n, addr, err := udpConn.ReadFromUDPAddrPort(buf)
+		data, put, addr, err := enhanceUDPConn.WaitReadFrom()
 		if err != nil {
-			BufPool.Put(buf)
 			// TODO: handle close
 			log.Println(err)
 			continue
 		}
 		go func() {
-			defer BufPool.Put(buf)
+			defer put()
 			var err error
 			v, _ := t.connMap.LoadOrStore(addr, &StdMapItem{})
 			mapItem := v.(*StdMapItem)
@@ -89,7 +88,7 @@ func (t *StdTunnel) Handle() {
 				target := t.target
 				addition := ""
 				if t.ssTester != nil {
-					if ok, name, newTarget := t.ssTester.TestPacket(buf[:n]); ok {
+					if ok, name, newTarget := t.ssTester.TestPacket(data); ok {
 						addition = fmt.Sprintf("SS[%s]", name)
 						target = newTarget
 					}
@@ -132,10 +131,10 @@ func (t *StdTunnel) Handle() {
 				}()
 			}
 			mapItem.Mutex.Unlock()
-			if len(t.reserved) > 0 && n > len(t.reserved) { // wireguard reserved
-				copy(buf[1:], t.reserved)
+			if len(t.reserved) > 0 && len(data) > len(t.reserved) { // wireguard reserved
+				copy(data[1:], t.reserved)
 			}
-			_, err = remoteConn.Write(buf[:n])
+			_, err = remoteConn.Write(data)
 			if err != nil {
 				log.Println(err)
 				return
