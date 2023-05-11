@@ -45,10 +45,11 @@ func (c *BufferedConn) Buffered() int {
 }
 
 func (c *BufferedConn) ReadCached() []byte {
-	if c.r.Buffered() > 0 {
+	if c.r != nil && c.r.Buffered() > 0 {
 		length := c.r.Buffered()
 		b, _ := c.r.Peek(length)
 		_, _ = c.r.Discard(length)
+		c.r = nil // drop bufio.Reader to let gc can clean up its internal buf
 		return b
 	}
 	return nil
@@ -59,14 +60,14 @@ func (c *BufferedConn) WriteTo(w io.Writer) (n int64, err error) {
 }
 
 func (c *BufferedConn) ReaderReplaceable() bool {
-	if c.r.Buffered() > 0 {
+	if c.r != nil && c.r.Buffered() > 0 {
 		return false
 	}
 	return true
 }
 
 func (c *BufferedConn) ToReader() io.Reader {
-	if c.r.Buffered() > 0 {
+	if c.r != nil && c.r.Buffered() > 0 {
 		return c
 	}
 	return c.Conn
