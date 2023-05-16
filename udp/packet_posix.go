@@ -3,7 +3,6 @@
 package udp
 
 import (
-	"io"
 	"net"
 	"net/netip"
 	"strconv"
@@ -35,6 +34,7 @@ func (c *enhanceUDPConn) WaitReadFrom() (data []byte, put func(), addr netip.Add
 		} else {
 			put()
 			put = nil
+			data = nil
 		}
 		if readErr == syscall.EAGAIN {
 			return false
@@ -49,9 +49,10 @@ func (c *enhanceUDPConn) WaitReadFrom() (data []byte, put func(), addr netip.Add
 				port = from.Port
 			}
 		}
-		if readN == 0 {
-			readErr = io.EOF
-		}
+		// udp should not convert readN == 0 to io.EOF
+		//if readN == 0 {
+		//	readErr = io.EOF
+		//}
 		return true
 	})
 	if err != nil {
