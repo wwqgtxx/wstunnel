@@ -1,8 +1,6 @@
 package udp
 
 import (
-	"fmt"
-	"golang.org/x/exp/slices"
 	"golang.org/x/net/ipv4"
 	"golang.org/x/net/ipv6"
 	"log"
@@ -11,7 +9,6 @@ import (
 	"time"
 
 	"github.com/wwqgtxx/wstunnel/config"
-	"github.com/wwqgtxx/wstunnel/fallback/ssaead"
 )
 
 const (
@@ -49,35 +46,14 @@ type MmsgMapItem struct {
 }
 
 type MmsgTunnel struct {
-	connMap  sync.Map
-	address  string
-	target   string
-	reserved []byte
-	ssTester *ssaead.Tester[string]
+	connMap sync.Map
+	tunnel
 }
 
 func NewMmsgTunnel(udpConfig config.UdpConfig) Tunnel {
-	t := &MmsgTunnel{
-		address:  udpConfig.BindAddress,
-		target:   udpConfig.TargetAddress,
-		reserved: slices.Clone(udpConfig.Reserved),
+	return &MmsgTunnel{
+		tunnel: newTunnel(udpConfig),
 	}
-	var err error
-	if len(udpConfig.SSFallback) > 0 {
-		t.ssTester = ssaead.NewTester[string]()
-		for _, ssFallbackConfig := range udpConfig.SSFallback {
-			err = t.ssTester.Add(
-				ssFallbackConfig.Name,
-				ssFallbackConfig.Method,
-				ssFallbackConfig.Password,
-				ssFallbackConfig.Address,
-			)
-			if err != nil {
-				log.Println(err)
-			}
-		}
-	}
-	return t
 }
 
 func (t *MmsgTunnel) Handle() {
@@ -151,14 +127,7 @@ func (t *MmsgTunnel) Handle() {
 				remoteConn := mapItem.Conn
 				remotePacketConn := mapItem.PacketConn
 				if remoteConn == nil || remotePacketConn == nil {
-					target := t.target
-					addition := ""
-					if t.ssTester != nil {
-						if ok, name, newTarget := t.ssTester.TestPacket(wMsgs[0].Buffers[0]); ok {
-							addition = fmt.Sprintf("SS[%s]", name)
-							target = newTarget
-						}
-					}
+					target, addition := t.getTarget(wMsgs[0].Buffers[0])
 					log.Println("Dial", addition, "to", target, "for", addr)
 					remoteConn, err = net.Dial("udp", t.target)
 					if err != nil {
