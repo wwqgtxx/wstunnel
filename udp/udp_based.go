@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/fallback/quic"
 	"github.com/wwqgtxx/wstunnel/fallback/ssaead"
 )
 
@@ -14,7 +15,8 @@ type tunnel struct {
 	target   string
 	reserved []byte
 
-	ssTester *ssaead.Tester[string]
+	ssTester   *ssaead.Tester[string]
+	quicTester *quic.Tester[string]
 }
 
 func newTunnel(udpConfig config.UdpConfig) tunnel {
@@ -39,6 +41,18 @@ func newTunnel(udpConfig config.UdpConfig) tunnel {
 			}
 		}
 	}
+	if len(udpConfig.QuicFallback) > 0 {
+		t.quicTester = quic.NewTester[string]()
+		for _, quicFallbackConfig := range udpConfig.QuicFallback {
+			err = t.quicTester.Add(
+				quicFallbackConfig.SNI,
+				quicFallbackConfig.Address,
+			)
+			if err != nil {
+				log.Println(err)
+			}
+		}
+	}
 	return t
 }
 
@@ -50,6 +64,13 @@ func (t *tunnel) getTarget(packet []byte) (target, addition string) {
 	if t.ssTester != nil {
 		if ok, name, newTarget := t.ssTester.TestPacket(packet); ok {
 			addition = fmt.Sprintf("SS[%s]", name)
+			target = newTarget
+			return
+		}
+	}
+	if t.quicTester != nil {
+		if ok, name, newTarget := t.quicTester.TestPacket(packet); ok {
+			addition = fmt.Sprintf("Quic[%s]", name)
 			target = newTarget
 			return
 		}

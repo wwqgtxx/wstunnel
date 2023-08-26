@@ -49,13 +49,7 @@ func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool,
 		return false, nil
 	}
 
-	var sni string
-	_ = tls.Server(sniSniffConn{r: bytes.NewReader(helloBytes)}, &tls.Config{
-		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
-			sni = hello.ServerName
-			return nil, nil
-		},
-	}).Handshake()
+	sni := ExtractSniFromBytes(helloBytes)
 
 	if val, ok := t.Map[sni]; ok {
 		cb(sni, val)
@@ -66,6 +60,16 @@ func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool,
 		return true, nil
 	}
 	return false, nil
+}
+
+func ExtractSniFromBytes(helloBytes []byte) (sni string) {
+	_ = tls.Server(sniSniffConn{r: bytes.NewReader(helloBytes)}, &tls.Config{
+		GetConfigForClient: func(hello *tls.ClientHelloInfo) (*tls.Config, error) {
+			sni = hello.ServerName
+			return nil, nil
+		},
+	}).Handshake()
+	return
 }
 
 // sniSniffConn is a net.Conn that reads from r, fails on Writes or otherwise,

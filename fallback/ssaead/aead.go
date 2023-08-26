@@ -98,6 +98,9 @@ func aeadCipher(block func(key []byte) (cipher.Block, error), aead func(block ci
 	}
 }
 
+// export AeadCipher function
+var AeadCipher = aeadCipher
+
 type Method struct {
 	name          string
 	keySaltLength int

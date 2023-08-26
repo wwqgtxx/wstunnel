@@ -43,11 +43,17 @@ type FallbackConfig struct {
 	UnknownFallbackAddress string `yaml:"unknown-fallback-address"`
 
 	TLSFallback   []TLSFallbackConfig   `yaml:"tls-fallback"`
+	QuicFallback  []QuicFallbackConfig  `yaml:"quic-fallback"`
 	SSFallback    []SSFallbackConfig    `yaml:"ss-fallback"`
 	VmessFallback []VmessFallbackConfig `yaml:"vmess-fallback"`
 }
 
 type TLSFallbackConfig struct {
+	SNI     string `yaml:"sni"`
+	Address string `yaml:"address"`
+}
+
+type QuicFallbackConfig struct {
 	SNI     string `yaml:"sni"`
 	Address string `yaml:"address"`
 }
