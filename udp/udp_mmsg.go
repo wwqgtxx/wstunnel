@@ -169,11 +169,7 @@ func (t *MmsgTunnel) Handle() {
 							if wMsgsN == 1 { // maybe faster
 								_, err = udpConn.WriteTo(wMsgs[0].Buffers[0], nAddr)
 							} else {
-								var wN int
-								wN, err = packetConn.WriteBatch(wMsgs[:wMsgsN], 0)
-								if err == nil && wN != wMsgsN {
-									log.Println("warning wN=", wN, "wMsgsN=", wMsgsN)
-								}
+								err = writeBatch(packetConn, wMsgs[:wMsgsN])
 							}
 							if err != nil {
 								t.connMap.Delete(addr)
@@ -197,11 +193,7 @@ func (t *MmsgTunnel) Handle() {
 				if wMsgsN == 1 { // maybe faster
 					_, err = remoteConn.Write(wMsgs[0].Buffers[0])
 				} else {
-					var wN int
-					wN, err = remotePacketConn.WriteBatch(wMsgs[:wMsgsN], 0)
-					if err == nil && wN != wMsgsN {
-						log.Println("warning wN=", wN, "wMsgsN=", wMsgsN)
-					}
+					err = writeBatch(remotePacketConn, wMsgs[:wMsgsN])
 				}
 				if err != nil {
 					log.Println(err)
@@ -214,4 +206,17 @@ func (t *MmsgTunnel) Handle() {
 
 	}
 
+}
+
+func writeBatch(conn *ipv4.PacketConn, ms []ipv4.Message) error {
+	// On success, sendmmsg() returns the number of messages sent from msgvec;
+	// if this is less than vlen, the caller can retry with a further sendmmsg() call to send the remaining messages.
+	for i := 0; i < len(ms); {
+		wN, err := conn.WriteBatch(ms[i:], 0)
+		if err != nil {
+			return err
+		}
+		i += wN
+	}
+	return nil
 }
