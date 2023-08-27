@@ -1,6 +1,7 @@
 package listener
 
 import (
+	"context"
 	"errors"
 	"net"
 	"sync"
@@ -74,7 +75,9 @@ func (l *tcpListener) loop() {
 }
 
 func ListenTcp(listenerConfig Config) (net.Listener, error) {
-	netLn, err := tfo.Listen("tcp", listenerConfig.BindAddress)
+	lc := tfo.ListenConfig{}
+	lc.SetMultipathTCP(true)
+	netLn, err := lc.Listen(context.Background(), "tcp", listenerConfig.BindAddress)
 	if err != nil {
 		return nil, err
 	}
