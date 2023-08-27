@@ -2,8 +2,8 @@ package udp
 
 import (
 	"fmt"
-	"golang.org/x/exp/slices"
 	"log"
+	"slices"
 
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/fallback/quic"

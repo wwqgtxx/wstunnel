@@ -1,9 +1,9 @@
 package ssaead
 
 import (
-	"github.com/wwqgtxx/wstunnel/peek"
+	"slices"
 
-	"golang.org/x/exp/slices"
+	"github.com/wwqgtxx/wstunnel/peek"
 )
 
 type Pair[T any] struct {
@@ -27,8 +27,8 @@ func (t *Tester[T]) Add(name, method, password string, val T) (err error) {
 		return
 	}
 	t.Lists = append(t.Lists, pair)
-	slices.SortFunc(t.Lists, func(a, b Pair[T]) bool {
-		return a.Method.keySaltLength < b.Method.keySaltLength
+	slices.SortFunc(t.Lists, func(a, b Pair[T]) int {
+		return a.Method.keySaltLength - b.Method.keySaltLength
 	})
 	return
 }
