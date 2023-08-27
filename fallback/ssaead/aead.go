@@ -6,6 +6,7 @@ import (
 	"crypto/md5"
 	"crypto/sha1"
 	"errors"
+	"fmt"
 	"io"
 
 	"golang.org/x/crypto/chacha20poly1305"
@@ -58,6 +59,8 @@ func NewMethod(method string, key []byte, password string) (*Method, error) {
 	case "xchacha20-ietf-poly1305":
 		m.keySaltLength = 32
 		m.constructor = chacha20poly1305.NewX
+	default:
+		return nil, fmt.Errorf("unsupported method: %s", method)
 	}
 	if len(key) == m.keySaltLength {
 		m.key = key

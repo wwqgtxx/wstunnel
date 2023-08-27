@@ -42,10 +42,11 @@ type FallbackConfig struct {
 	WSFallbackAddress      string `yaml:"ws-fallback-address"`
 	UnknownFallbackAddress string `yaml:"unknown-fallback-address"`
 
-	TLSFallback   []TLSFallbackConfig   `yaml:"tls-fallback"`
-	QuicFallback  []QuicFallbackConfig  `yaml:"quic-fallback"`
-	SSFallback    []SSFallbackConfig    `yaml:"ss-fallback"`
-	VmessFallback []VmessFallbackConfig `yaml:"vmess-fallback"`
+	TLSFallback    []TLSFallbackConfig   `yaml:"tls-fallback"`
+	QuicFallback   []QuicFallbackConfig  `yaml:"quic-fallback"`
+	SSFallback     []SSFallbackConfig    `yaml:"ss-fallback"`
+	SS2022Fallback []SSFallbackConfig    `yaml:"ss2022-fallback"`
+	VmessFallback  []VmessFallbackConfig `yaml:"vmess-fallback"`
 }
 
 type TLSFallbackConfig struct {

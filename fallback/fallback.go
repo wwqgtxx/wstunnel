@@ -9,6 +9,7 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/common"
 	"github.com/wwqgtxx/wstunnel/config"
+	"github.com/wwqgtxx/wstunnel/fallback/ss2022"
 	"github.com/wwqgtxx/wstunnel/fallback/ssaead"
 	"github.com/wwqgtxx/wstunnel/fallback/tls"
 	"github.com/wwqgtxx/wstunnel/fallback/vmessaead"
@@ -37,6 +38,7 @@ type Fallback struct {
 	unknownClientImpl   common.ClientImpl
 	tlsTester           *tls.Tester[common.ClientImpl]
 	ssTester            *ssaead.Tester[common.ClientImpl]
+	ss2022Tester        *ss2022.Tester[common.ClientImpl]
 	vmessTester         *vmessaead.Tester[common.ClientImpl]
 	isWebSocketListener bool
 }
@@ -132,6 +134,18 @@ func (f *Fallback) Handle(conn peek.Conn, edBuf []byte, inHeader http.Header) bo
 			return true
 		}
 	}
+	if f.ss2022Tester != nil { // peek size == (16/24/32) + n*16 + 11 + 16
+		ok, err = f.ss2022Tester.Test(conn, func(name string, clientImpl common.ClientImpl) {
+			tunnel(clientImpl, fmt.Sprintf("SS2022[%s]", name), false)
+		})
+		if err != nil && !IsTimeout(err) {
+			log.Println(err)
+			return accept()
+		}
+		if ok {
+			return true
+		}
+	}
 	if f.unknownClientImpl != nil {
 		return tunnel(f.unknownClientImpl, "Unknown", false)
 	}
@@ -145,6 +159,7 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	var unknownClientImpl common.ClientImpl
 	var tlsTester *tls.Tester[common.ClientImpl]
 	var ssTester *ssaead.Tester[common.ClientImpl]
+	var ss2022Tester *ss2022.Tester[common.ClientImpl]
 	var vmessTester *vmessaead.Tester[common.ClientImpl]
 	if len(fallbackConfig.SshFallbackAddress) > 0 {
 		sshClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.SshFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
@@ -187,6 +202,20 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 			}
 		}
 	}
+	if len(fallbackConfig.SS2022Fallback) > 0 {
+		ss2022Tester = ss2022.NewTester[common.ClientImpl]()
+		for _, ss2022FallbackConfig := range fallbackConfig.SS2022Fallback {
+			err = ss2022Tester.Add(
+				ss2022FallbackConfig.Name,
+				ss2022FallbackConfig.Method,
+				ss2022FallbackConfig.Password,
+				NewClientImpl(config.ClientConfig{TargetAddress: ss2022FallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig}),
+			)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
 	if len(fallbackConfig.VmessFallback) > 0 {
 		vmessTester = vmessaead.NewTester[common.ClientImpl]()
 		for _, vmessFallbackConfig := range fallbackConfig.VmessFallback {
@@ -208,6 +237,7 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 			unknownClientImpl:   unknownClientImpl,
 			tlsTester:           tlsTester,
 			ssTester:            ssTester,
+			ss2022Tester:        ss2022Tester,
 			vmessTester:         vmessTester,
 			isWebSocketListener: fallbackConfig.IsWebSocketListener,
 		}
