@@ -34,6 +34,7 @@ func (t *Tester[T]) Add(name, method, password string, val T) (err error) {
 }
 
 func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool, error) {
+	dstBuffer := make([]byte, 0, PacketLengthBufferSize)
 	var err error
 	var lastPeekBuf []byte
 	var lastPeekLen int
@@ -58,8 +59,7 @@ func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool,
 			return false, err
 		}
 		lengthChunk := header[method.keySaltLength:]
-		length := make([]byte, PacketLengthBufferSize)
-		_, err = readCipher.Open(length[:0], peek.Zero[:readCipher.NonceSize()], lengthChunk, nil)
+		_, err = readCipher.Open(dstBuffer, peek.Zero[:readCipher.NonceSize()], lengthChunk, nil)
 		if err != nil {
 			continue
 		}
@@ -70,6 +70,7 @@ func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool,
 }
 
 func (t *Tester[T]) TestPacket(packet []byte) (bool, string, T) {
+	dstBuffer := make([]byte, 0, len(packet)-Overhead)
 	var err error
 	var emptyVal T
 	for _, pair := range t.Lists {
@@ -87,7 +88,7 @@ func (t *Tester[T]) TestPacket(packet []byte) (bool, string, T) {
 			return false, "", emptyVal
 		}
 		_, err = readCipher.Open(
-			make([]byte, 0, len(packet)-Overhead),
+			dstBuffer,
 			peek.Zero[:readCipher.NonceSize()],
 			packet[method.keySaltLength:],
 			nil,

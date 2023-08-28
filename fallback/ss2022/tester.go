@@ -40,6 +40,7 @@ func (t *Tester[T]) Add(name, method, password string, val T) (err error) {
 }
 
 func (t *Tester[T]) Test(peeker peek.Peeker, cb func(name string, val T)) (bool, error) {
+	dstBuffer := make([]byte, 0, RequestHeaderFixedChunkLength)
 	var err error
 	var lastPeekBuf []byte
 	var lastPeekLen int
@@ -89,8 +90,7 @@ ListsLoop:
 		}
 
 		fixedLengthHeaderChunk := header[method.keySaltLength+aes.BlockSize*len(method.uPSKHash):]
-		fixedLengthHeader := make([]byte, RequestHeaderFixedChunkLength)
-		_, err = readCipher.Open(fixedLengthHeader[:0], peek.Zero[:readCipher.NonceSize()], fixedLengthHeaderChunk, nil)
+		_, err = readCipher.Open(dstBuffer, peek.Zero[:readCipher.NonceSize()], fixedLengthHeaderChunk, nil)
 		if err != nil {
 			continue
 		}
@@ -101,6 +101,7 @@ ListsLoop:
 }
 
 func (t *Tester[T]) TestPacket(packet []byte) (bool, string, T) {
+	dstBuffer := make([]byte, 0, len(packet)-aes.BlockSize-ssaead.Overhead)
 	var emptyVal T
 ListsLoop:
 	for _, pair := range t.Lists {
@@ -134,7 +135,7 @@ ListsLoop:
 		}
 
 		_, err = readCipher.Open(
-			make([]byte, 0, len(packet)-aes.BlockSize-aes.BlockSize*len(method.uPSKHash)-ssaead.Overhead),
+			dstBuffer,
 			packetHeader[4:16],
 			packet[16+aes.BlockSize*len(method.uPSKHash):],
 			nil,
