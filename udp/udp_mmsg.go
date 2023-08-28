@@ -129,7 +129,7 @@ func (t *MmsgTunnel) Handle() {
 				if remoteConn == nil || remotePacketConn == nil {
 					target, addition := t.getTarget(wMsgs[0].Buffers[0])
 					log.Println("Dial", addition, "to", target, "for", addr)
-					remoteConn, err = net.Dial("udp", t.target)
+					remoteConn, err = net.Dial("udp", target)
 					if err != nil {
 						mapItem.Mutex.Unlock()
 						log.Println(err)
