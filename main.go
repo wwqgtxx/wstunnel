@@ -1,7 +1,6 @@
 package main
 
 import (
-	"github.com/wwqgtxx/wstunnel/udp"
 	"log"
 	"os"
 	"os/signal"
@@ -11,6 +10,7 @@ import (
 	"github.com/wwqgtxx/wstunnel/client"
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/server"
+	"github.com/wwqgtxx/wstunnel/udp"
 )
 
 func main() {

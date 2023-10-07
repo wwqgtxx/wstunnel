@@ -10,8 +10,6 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/peek"
 	"github.com/wwqgtxx/wstunnel/utils"
-
-	"github.com/gorilla/websocket"
 )
 
 const (
@@ -19,35 +17,10 @@ const (
 )
 
 var (
-	BufPool         = sync.Pool{New: func() any { return make([]byte, BufSize) }}
-	WriteBufferPool = &sync.Pool{}
+	BufPool = sync.Pool{New: func() any { return make([]byte, BufSize) }}
 )
 
-func TcpWs(tcp net.Conn, ws *websocket.Conn) {
-	setKeepAlive(tcp)
-	setKeepAlive(ws.UnderlyingConn())
-
-	exit := make(chan struct{}, 1)
-
-	go func() {
-		_, err := Copy(utils.NewWsWriter(ws), tcp)
-		if err != nil && err == io.EOF {
-			log.Println(err)
-		}
-		_ = ws.SetReadDeadline(time.Now())
-		exit <- struct{}{}
-	}()
-
-	_, err := Copy(tcp, utils.NewWsReader(ws))
-	if err != nil && err == io.EOF {
-		log.Println(err)
-	}
-	_ = tcp.SetReadDeadline(time.Now())
-
-	<-exit
-}
-
-func TcpTcp(tcp1 net.Conn, tcp2 net.Conn) {
+func Tunnel(tcp1 net.Conn, tcp2 net.Conn) {
 	setKeepAlive(tcp1)
 	setKeepAlive(tcp2)
 
@@ -117,6 +90,9 @@ func Copy(dst io.Writer, src io.Reader) (written int64, err error) {
 
 func setKeepAlive(c net.Conn) {
 	writer := peek.ToWriter(c) // writer is always the underlying conn in peek.Conn
+	if wsConn, ok := writer.(*utils.WebsocketConn); ok {
+		writer = wsConn.Conn
+	}
 	if conn, ok := writer.(interface{ SetKeepAlive(keepalive bool) error }); ok {
 		_ = conn.SetKeepAlive(true)
 	}

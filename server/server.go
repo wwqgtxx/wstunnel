@@ -10,17 +10,8 @@ import (
 	"github.com/wwqgtxx/wstunnel/fallback"
 	"github.com/wwqgtxx/wstunnel/listener"
 	"github.com/wwqgtxx/wstunnel/peek/peekws"
-	"github.com/wwqgtxx/wstunnel/tunnel"
 	"github.com/wwqgtxx/wstunnel/utils"
-
-	"github.com/gorilla/websocket"
 )
-
-var upgrader = websocket.Upgrader{
-	ReadBufferSize:  tunnel.BufSize,
-	WriteBufferSize: tunnel.BufSize,
-	WriteBufferPool: tunnel.WriteBufferPool,
-}
 
 type server struct {
 	serverHandler  ServerHandler
@@ -73,7 +64,7 @@ type serverHandler struct {
 }
 
 func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if !websocket.IsWebSocketUpgrade(r) {
+	if !utils.IsWebSocketUpgrade(r) {
 		closeTcpHandle(w, r)
 		return
 	}
@@ -88,27 +79,28 @@ func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	edBuf, responseHeader := utils.DecodeXray0rtt(r.Header)
+	edBuf := utils.DecodeXray0rtt(r.Header)
 
 	if s.Fallback != nil {
-		ws, err := upgrader.Upgrade(w, r, responseHeader)
+		wsConn, err := utils.ServerWebsocketUpgrade(w, r)
 		if err != nil {
 			log.Println(err)
 			return
 		}
-		defer ws.Close()
-		conn := peekws.New(ws, ws.RemoteAddr(), edBuf)
-		if s.Fallback.Handle(conn, edBuf, responseHeader) {
+		defer wsConn.Close()
+		conn := peekws.New(wsConn, edBuf)
+		if s.Fallback.Handle(conn, edBuf, r.Header) {
 			return
 		}
 		// send inHeader to client for Xray's 0rtt ws
-		target, err := s.Dial(edBuf, responseHeader)
+		target, err := s.Dial(edBuf, r.Header)
 		if err != nil {
 			log.Println(err)
 			return
 		}
 		defer target.Close()
 		target.TunnelTcp(conn)
+		return
 	}
 
 	ch := make(chan common.ClientConn)
@@ -121,7 +113,7 @@ func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		defer close(ch)
 		// send inHeader to client for Xray's 0rtt ws
-		target, err := s.Dial(edBuf, responseHeader)
+		target, err := s.Dial(edBuf, r.Header)
 		if err != nil {
 			log.Println(err)
 			return
@@ -129,19 +121,19 @@ func (s *serverHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		ch <- target
 	}()
 
-	ws, err := upgrader.Upgrade(w, r, responseHeader)
+	wsConn, err := utils.ServerWebsocketUpgrade(w, r)
 	if err != nil {
 		log.Println(err)
 		return
 	}
-	defer ws.Close()
+	defer wsConn.Close()
 
 	target, ok := <-ch
 	if !ok {
 		return
 	}
 	defer target.Close()
-	target.TunnelWs(ws)
+	target.TunnelWs(wsConn)
 }
 
 func closeTcpHandle(writer http.ResponseWriter, request *http.Request) {

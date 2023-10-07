@@ -13,36 +13,30 @@ func DecodeEd(s string) ([]byte, error) {
 	return base64.RawURLEncoding.DecodeString(replacer.Replace(s))
 }
 
-func DecodeXray0rtt(requestHeader http.Header) ([]byte, http.Header) {
-	var edBuf []byte
-	responseHeader := http.Header{}
+func DecodeXray0rtt(requestHeader http.Header) []byte {
 	// read inHeader's `Sec-WebSocket-Protocol` for Xray's 0rtt ws
 	if secProtocol := requestHeader.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-		if buf, err := DecodeEd(secProtocol); err == nil { // sure could base64 decode
-			edBuf = buf
-			responseHeader.Set("Sec-WebSocket-Protocol", secProtocol)
+		if edBuf, err := DecodeEd(secProtocol); err == nil { // sure could base64 decode
+			return edBuf
 		}
 	}
-	return edBuf, responseHeader
+	return nil
 }
 
 func EncodeEd(edBuf []byte) string {
 	return base64.RawURLEncoding.EncodeToString(edBuf)
 }
 
-func EncodeXray0rtt(tcp net.Conn, ed uint32) (http.Header, []byte, error) {
-	header := http.Header{}
+func PrepareXray0rtt(tcp net.Conn, ed uint32) ([]byte, error) {
 	// Xray's 0rtt ws
 	var edBuf []byte
 	if ed > 0 {
 		edBuf = make([]byte, ed)
 		n, err := tcp.Read(edBuf)
 		if err != nil {
-			return nil, nil, err
+			return nil, err
 		}
 		edBuf = edBuf[:n]
-
-		header.Set("Sec-WebSocket-Protocol", EncodeEd(edBuf))
 	}
-	return header, edBuf, nil
+	return edBuf, nil
 }

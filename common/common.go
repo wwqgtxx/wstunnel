@@ -4,7 +4,7 @@ import (
 	"net"
 	"net/http"
 
-	"github.com/gorilla/websocket"
+	"github.com/wwqgtxx/wstunnel/utils"
 )
 
 var PortToServer = make(map[string]Server)
@@ -38,7 +38,7 @@ type ClientImpl interface {
 type ClientConn interface {
 	Close()
 	TunnelTcp(tcp net.Conn)
-	TunnelWs(ws *websocket.Conn)
+	TunnelWs(wsConn *utils.WebsocketConn)
 }
 
 type HasListenerConfig interface {

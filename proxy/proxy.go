@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package client
+package proxy
 
 import (
 	"bufio"
@@ -15,7 +15,7 @@ import (
 )
 
 func init() {
-	proxy_RegisterDialerType("http", func(proxyURL *url.URL, forwardDialer proxy_Dialer) (proxy_Dialer, error) {
+	RegisterDialerType("http", func(proxyURL *url.URL, forwardDialer Dialer) (Dialer, error) {
 		return &httpProxyDialer{proxyURL: proxyURL, forwardDial: forwardDialer.Dial}, nil
 	})
 }

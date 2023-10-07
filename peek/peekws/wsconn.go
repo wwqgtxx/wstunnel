@@ -1,49 +1,11 @@
 package peekws
 
-// modify from https://github.com/MetaCubeX/Clash.Meta/blob/4a0d097fe9f1b8fe352267040658331168e8abd8/transport/vmess/websocket.go
-
 import (
-	"io"
-	"net"
-	"time"
-
 	"github.com/wwqgtxx/wstunnel/peek"
 	"github.com/wwqgtxx/wstunnel/peek/deadline"
 	"github.com/wwqgtxx/wstunnel/utils"
-
-	"github.com/gorilla/websocket"
+	"io"
 )
-
-type websocketConn struct {
-	io.Reader
-	io.Writer
-	io.Closer
-	conn       *websocket.Conn
-	remoteAddr net.Addr
-}
-
-func (wsc *websocketConn) LocalAddr() net.Addr {
-	return wsc.conn.LocalAddr()
-}
-
-func (wsc *websocketConn) RemoteAddr() net.Addr {
-	return wsc.remoteAddr
-}
-
-func (wsc *websocketConn) SetDeadline(t time.Time) error {
-	if err := wsc.SetReadDeadline(t); err != nil {
-		return err
-	}
-	return wsc.SetWriteDeadline(t)
-}
-
-func (wsc *websocketConn) SetReadDeadline(t time.Time) error {
-	return wsc.conn.SetReadDeadline(t)
-}
-
-func (wsc *websocketConn) SetWriteDeadline(t time.Time) error {
-	return wsc.conn.SetWriteDeadline(t)
-}
 
 type edPeekConn struct {
 	peek.Conn
@@ -84,18 +46,10 @@ func (c *edPeekConn) ToWriter() io.Writer {
 	return c.Conn
 }
 
-func New(ws *websocket.Conn, rAddr net.Addr, edBuf []byte) (c peek.Conn) {
+func New(wsConn *utils.WebsocketConn, edBuf []byte) (c peek.Conn) {
 	// websocketConn can't correct handle ReadDeadline
-	// gorilla/websocket will cache the os.ErrDeadlineExceeded from conn.Read()
-	// it will cause read fail and event panic in *websocket.Conn.NextReader()
 	// so call deadline.New to add a safe wrapper
-	c = peek.NewBufferedConn(deadline.New(&websocketConn{
-		Reader:     utils.NewWsReader(ws),
-		Writer:     utils.NewWsWriter(ws),
-		Closer:     utils.NewWsCloser(ws),
-		conn:       ws,
-		remoteAddr: rAddr,
-	}))
+	c = peek.NewBufferedConn(deadline.New(wsConn))
 	if len(edBuf) > 0 {
 		c = &edPeekConn{c, edBuf}
 	}
