@@ -16,6 +16,7 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/proxy"
 
+	"github.com/gobwas/pool/pbufio"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
 )
@@ -83,8 +84,18 @@ func (w *WebsocketConn) Read(p []byte) (n int, err error) {
 	}
 }
 
+func (w *WebsocketConn) WriteMessage(op ws.OpCode, p []byte) error {
+	writer := pbufio.GetWriter(w.Conn, wsutil.DefaultWriteBuffer) // using a bufio.Writer to combine Header and Payload
+	defer pbufio.PutWriter(writer)
+	err := wsutil.WriteMessage(writer, w.state, op, p)
+	if err != nil {
+		return err
+	}
+	return writer.Flush()
+}
+
 func (w *WebsocketConn) Write(p []byte) (n int, err error) {
-	err = wsutil.WriteMessage(w.Conn, w.state, ws.OpBinary, p)
+	err = w.WriteMessage(ws.OpBinary, p)
 	if err != nil {
 		return
 	}
@@ -95,7 +106,7 @@ func (w *WebsocketConn) Write(p []byte) (n int, err error) {
 func (w *WebsocketConn) Close() error {
 	var e []string
 	_ = w.Conn.SetWriteDeadline(time.Now().Add(time.Second * 5))
-	if err := wsutil.WriteMessage(w.Conn, w.state, ws.OpClose, ws.NewCloseFrameBody(ws.StatusNormalClosure, "")); err != nil {
+	if err := w.WriteMessage(ws.OpClose, ws.NewCloseFrameBody(ws.StatusNormalClosure, "")); err != nil {
 		e = append(e, err.Error())
 	}
 	if err := w.Conn.Close(); err != nil {
