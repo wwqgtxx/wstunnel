@@ -18,6 +18,16 @@ func NewBufferedConn(c net.Conn) *BufferedConn {
 	return &BufferedConn{bufio.NewReader(c), c}
 }
 
+func WarpConnWithBioReader(c net.Conn, br *bufio.Reader) net.Conn {
+	if br != nil && br.Buffered() > 0 {
+		if bc, ok := c.(*BufferedConn); ok && bc.r == br {
+			return bc
+		}
+		return &BufferedConn{br, c}
+	}
+	return c
+}
+
 // Reader returns the internal bufio.Reader.
 func (c *BufferedConn) Reader() *bufio.Reader {
 	return c.r

@@ -1,7 +1,6 @@
 package utils
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -14,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wwqgtxx/wstunnel/peek"
 	"github.com/wwqgtxx/wstunnel/proxy"
 
 	"github.com/gobwas/pool/pbufio"
@@ -28,19 +28,13 @@ type WebsocketConn struct {
 	controlHandler wsutil.FrameHandlerFunc
 }
 
-func NewWebsocketConn(conn net.Conn, br *bufio.Reader, state ws.State) *WebsocketConn {
+func NewWebsocketConn(conn net.Conn, state ws.State) *WebsocketConn {
 	controlHandler := wsutil.ControlFrameHandler(conn, state)
-	var reader io.Reader
-	if br != nil && br.Buffered() > 0 {
-		reader = br
-	} else {
-		reader = conn
-	}
 	return &WebsocketConn{
 		Conn:  conn,
 		state: state,
 		reader: &wsutil.Reader{
-			Source:          reader,
+			Source:          conn,
 			State:           state,
 			SkipHeaderCheck: true,
 			CheckUTF8:       false,
@@ -123,7 +117,11 @@ func ServerWebsocketUpgrade(w http.ResponseWriter, r *http.Request) (*WebsocketC
 	if err != nil {
 		return nil, err
 	}
-	return NewWebsocketConn(wsConn, rw.Reader, ws.StateServerSide), nil
+
+	// gobwas/ws will flush rw.Writer, so we only need warp rw.Reader
+	wsConn = peek.WarpConnWithBioReader(wsConn, rw.Reader)
+
+	return NewWebsocketConn(wsConn, ws.StateServerSide), nil
 }
 
 func IsWebSocketUpgrade(r *http.Request) bool {
@@ -173,5 +171,9 @@ func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDia
 		return nil, headers, err
 	}
 
-	return NewWebsocketConn(conn, br, ws.StateClientSide), headers, nil
+	// some bytes which could be written by the peer right after response and be caught by us during buffered read,
+	// so we need warp Conn with bio.Reader
+	conn = peek.WarpConnWithBioReader(conn, br)
+
+	return NewWebsocketConn(conn, ws.StateClientSide), headers, nil
 }
