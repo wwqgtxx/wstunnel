@@ -1,6 +1,7 @@
 package utils
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -23,15 +24,17 @@ import (
 
 type WebsocketConn struct {
 	net.Conn
+	isRaw          bool
 	state          ws.State
 	reader         *wsutil.Reader
 	controlHandler wsutil.FrameHandlerFunc
 }
 
-func NewWebsocketConn(conn net.Conn, state ws.State) *WebsocketConn {
+func NewWebsocketConn(conn net.Conn, state ws.State, isRaw bool) *WebsocketConn {
 	controlHandler := wsutil.ControlFrameHandler(conn, state)
 	return &WebsocketConn{
 		Conn:  conn,
+		isRaw: isRaw,
 		state: state,
 		reader: &wsutil.Reader{
 			Source:          conn,
@@ -45,6 +48,9 @@ func NewWebsocketConn(conn net.Conn, state ws.State) *WebsocketConn {
 }
 
 func (w *WebsocketConn) Read(p []byte) (n int, err error) {
+	if w.isRaw {
+		return w.Conn.Read(p)
+	}
 	var header ws.Header
 	for {
 		n, err = w.reader.Read(p)
@@ -78,7 +84,7 @@ func (w *WebsocketConn) Read(p []byte) (n int, err error) {
 	}
 }
 
-func (w *WebsocketConn) WriteMessage(op ws.OpCode, p []byte) error {
+func (w *WebsocketConn) writeMessage(op ws.OpCode, p []byte) error {
 	writer := pbufio.GetWriter(w.Conn, wsutil.DefaultWriteBuffer) // using a bufio.Writer to combine Header and Payload
 	defer pbufio.PutWriter(writer)
 	err := wsutil.WriteMessage(writer, w.state, op, p)
@@ -89,7 +95,10 @@ func (w *WebsocketConn) WriteMessage(op ws.OpCode, p []byte) error {
 }
 
 func (w *WebsocketConn) Write(p []byte) (n int, err error) {
-	err = w.WriteMessage(ws.OpBinary, p)
+	if w.isRaw {
+		return w.Conn.Write(p)
+	}
+	err = w.writeMessage(ws.OpBinary, p)
 	if err != nil {
 		return
 	}
@@ -98,9 +107,12 @@ func (w *WebsocketConn) Write(p []byte) (n int, err error) {
 }
 
 func (w *WebsocketConn) Close() error {
+	if w.isRaw {
+		return w.Conn.Close()
+	}
 	var e []string
 	_ = w.Conn.SetWriteDeadline(time.Now().Add(time.Second * 5))
-	if err := w.WriteMessage(ws.OpClose, ws.NewCloseFrameBody(ws.StatusNormalClosure, "")); err != nil {
+	if err := w.writeMessage(ws.OpClose, ws.NewCloseFrameBody(ws.StatusNormalClosure, "")); err != nil {
 		e = append(e, err.Error())
 	}
 	if err := w.Conn.Close(); err != nil {
@@ -112,20 +124,64 @@ func (w *WebsocketConn) Close() error {
 	return nil
 }
 
+func (w *WebsocketConn) ReaderReplaceable() bool {
+	return w.isRaw
+}
+
+func (w *WebsocketConn) ToReader() io.Reader {
+	return w.Conn
+}
+
+func (w *WebsocketConn) WriterReplaceable() bool {
+	return w.isRaw
+}
+
+func (w *WebsocketConn) ToWriter() io.Writer {
+	return w.Conn
+}
+
 func ServerWebsocketUpgrade(w http.ResponseWriter, r *http.Request) (*WebsocketConn, error) {
-	wsConn, rw, _, err := ws.UpgradeHTTP(r, w)
-	if err != nil {
-		return nil, err
+	var conn net.Conn
+	var rw *bufio.ReadWriter
+	var err error
+	isRaw := IsV2rayHttpUpdate(r)
+	if isRaw { // v2ray-http-upgrade
+		w.Header().Set("Connection", "upgrade")
+		w.Header().Set("Upgrade", "websocket")
+		w.WriteHeader(http.StatusSwitchingProtocols)
+		if flusher, isFlusher := w.(interface{ FlushError() error }); isFlusher {
+			err = flusher.FlushError()
+			if err != nil {
+				return nil, fmt.Errorf("flush response: %w", err)
+			}
+		}
+		hijacker, canHijack := w.(http.Hijacker)
+		if !canHijack {
+			return nil, errors.New("invalid connection, maybe HTTP/2")
+		}
+		conn, rw, err = hijacker.Hijack()
+		if err != nil {
+			return nil, fmt.Errorf("hijack failed: %w", err)
+		}
+	} else {
+		conn, rw, _, err = ws.UpgradeHTTP(r, w)
+		if err != nil {
+			return nil, fmt.Errorf("ws upgrade failed: %w", err)
+		}
 	}
 
 	// gobwas/ws will flush rw.Writer, so we only need warp rw.Reader
-	wsConn = peek.WarpConnWithBioReader(wsConn, rw.Reader)
+	conn = peek.WarpConnWithBioReader(conn, rw.Reader)
 
-	return NewWebsocketConn(wsConn, ws.StateServerSide), nil
+	return NewWebsocketConn(conn, ws.StateServerSide, isRaw), nil
 }
 
 func IsWebSocketUpgrade(r *http.Request) bool {
 	return r.Header.Get("Upgrade") == "websocket"
+}
+
+func IsV2rayHttpUpdate(r *http.Request) bool {
+	return IsWebSocketUpgrade(r) && r.Header.Get("Sec-WebSocket-Key") == ""
 }
 
 func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDialerFunc, tlsConfig *tls.Config, dialTimeout time.Duration) (*WebsocketConn, http.Header, error) {
@@ -175,5 +231,5 @@ func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDia
 	// so we need warp Conn with bio.Reader
 	conn = peek.WarpConnWithBioReader(conn, br)
 
-	return NewWebsocketConn(conn, ws.StateClientSide), headers, nil
+	return NewWebsocketConn(conn, ws.StateClientSide, false), headers, nil
 }

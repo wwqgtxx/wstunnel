@@ -184,8 +184,12 @@ func (c *wsClientConn) TunnelTcp(tcp net.Conn) {
 }
 
 func (c *wsClientConn) TunnelWs(wsConn *utils.WebsocketConn) {
-	// fastpath for direct tunnel underlying ws connection
-	tunnel.Tunnel(wsConn.Conn, c.wsConn.Conn)
+	if wsConn.ReaderReplaceable() == c.wsConn.ReaderReplaceable() {
+		// fastpath for direct tunnel underlying ws connection
+		tunnel.Tunnel(wsConn.Conn, c.wsConn.Conn)
+	} else {
+		tunnel.Tunnel(wsConn, c.wsConn)
+	}
 }
 
 func (c *tcpClientImpl) Target() string {
