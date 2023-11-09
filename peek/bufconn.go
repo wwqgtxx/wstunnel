@@ -59,9 +59,9 @@ func (c *BufferedConn) ReadCached() []byte {
 		length := c.r.Buffered()
 		b, _ := c.r.Peek(length)
 		_, _ = c.r.Discard(length)
-		c.r = nil // drop bufio.Reader to let gc can clean up its internal buf
 		return b
 	}
+	c.r = nil // drop bufio.Reader to let gc can clean up its internal buf
 	return nil
 }
 
