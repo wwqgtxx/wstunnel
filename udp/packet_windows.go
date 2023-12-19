@@ -11,6 +11,10 @@ type enhanceUDPConn struct {
 	*net.UDPConn
 }
 
+func newEnhancePacketConn(udpConn *net.UDPConn) EnhancePacketConn {
+	return &enhanceUDPConn{UDPConn: udpConn}
+}
+
 func (c *enhanceUDPConn) WaitReadFrom() (data []byte, put func(), addr netip.AddrPort, err error) {
 	readBuf := BufPool.Get().([]byte)
 	put = func() {

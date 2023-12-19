@@ -12,7 +12,7 @@ type EnhancePacketConn interface {
 
 func NewEnhancePacketConn(pc net.PacketConn) EnhancePacketConn {
 	if udpConn, isUDPConn := pc.(*net.UDPConn); isUDPConn {
-		return &enhanceUDPConn{UDPConn: udpConn}
+		return newEnhancePacketConn(udpConn)
 	}
 	if enhancePC, isEnhancePC := pc.(EnhancePacketConn); isEnhancePC {
 		return enhancePC
