@@ -184,6 +184,29 @@ func IsV2rayHttpUpdate(r *http.Request) bool {
 
 func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDialerFunc, tlsConfig *tls.Config, dialTimeout time.Duration) (*WebsocketConn, http.Header, error) {
 	hostname := uri.Hostname()
+	port := uri.Port()
+	if port == "" {
+		switch uri.Scheme {
+		case "ws":
+			port = "80"
+		case "wss":
+			port = "443"
+		}
+	}
+	conn, err := netDial("tcp", net.JoinHostPort(hostname, port))
+	if err != nil {
+		return nil, nil, err
+	}
+	if uri.Scheme == "wss" {
+		tlsConfig = tlsConfig.Clone()
+		tlsConfig.NextProtos = []string{"http/1.1"}
+		if tlsConfig.ServerName == "" && !tlsConfig.InsecureSkipVerify { // users must set either ServerName or InsecureSkipVerify in the config.
+			tlsConfig.ServerName = uri.Host
+		}
+
+		conn = tls.Client(conn, tlsConfig)
+	}
+
 	wsDialer := ws.Dialer{
 		Timeout: dialTimeout,
 		NetDial: func(ctx context.Context, network, addr string) (net.Conn, error) {
