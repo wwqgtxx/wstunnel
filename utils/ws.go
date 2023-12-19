@@ -3,6 +3,7 @@ package utils
 import (
 	"bufio"
 	"context"
+	"crypto/rand"
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
@@ -182,7 +183,7 @@ func IsV2rayHttpUpdate(r *http.Request) bool {
 	return IsWebSocketUpgrade(r) && r.Header.Get("Sec-WebSocket-Key") == ""
 }
 
-func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDialerFunc, tlsConfig *tls.Config, dialTimeout time.Duration) (*WebsocketConn, http.Header, error) {
+func ClientWebsocketDial(ctx context.Context, uri url.URL, cHeaders http.Header, dialer proxy.ContextDialer, tlsConfig *tls.Config, v2rayHttpUpgrade bool) (net.Conn, http.Header, error) {
 	hostname := uri.Hostname()
 	port := uri.Port()
 	if port == "" {
@@ -193,10 +194,12 @@ func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDia
 			port = "443"
 		}
 	}
-	conn, err := netDial("tcp", net.JoinHostPort(hostname, port))
+
+	conn, err := dialer.DialContext(ctx, "tcp", net.JoinHostPort(hostname, port))
 	if err != nil {
 		return nil, nil, err
 	}
+
 	if uri.Scheme == "wss" {
 		tlsConfig = tlsConfig.Clone()
 		tlsConfig.NextProtos = []string{"http/1.1"}
@@ -204,55 +207,87 @@ func ClientWebsocketDial(uri url.URL, cHeaders http.Header, netDial proxy.NetDia
 			tlsConfig.ServerName = uri.Host
 		}
 
-		conn = tls.Client(conn, tlsConfig)
+		tlsConn := tls.Client(conn, tlsConfig)
+		err = tlsConn.HandshakeContext(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		conn = tlsConn
 	}
 
-	wsDialer := ws.Dialer{
-		Timeout: dialTimeout,
-		NetDial: func(ctx context.Context, network, addr string) (net.Conn, error) {
-			if _, port, err := net.SplitHostPort(addr); err == nil {
-				addr = net.JoinHostPort(hostname, port)
-			}
-			return netDial(network, addr)
-		},
-		TLSConfig: tlsConfig,
+	if !strings.HasPrefix(uri.Path, "/") {
+		uri.Path = "/" + uri.Path
 	}
 
-	headers := http.Header{}
-	headers.Set("User-Agent", "Go-http-client/1.1") // match golang's net/http
-	if cHeaders != nil {
-		for k := range cHeaders {
-			headers.Add(k, cHeaders.Get(k))
+	request := &http.Request{
+		Method: http.MethodGet,
+		URL:    &uri,
+		Header: cHeaders,
+	}
+
+	request.Header.Set("Connection", "Upgrade")
+	request.Header.Set("Upgrade", "websocket")
+
+	if host := request.Header.Get("Host"); host != "" {
+		// For client requests, Host optionally overrides the Host
+		// header to send. If empty, the Request.Write method uses
+		// the value of URL.Host. Host may contain an international
+		// domain name.
+		request.Host = host
+		defer func() {
+			request.Header.Set("Host", host) // recover for logging
+		}()
+	}
+	request.Header.Del("Host")
+
+	var secKey string
+	if !v2rayHttpUpgrade {
+		const nonceKeySize = 16
+		// NOTE: bts does not escape.
+		bts := make([]byte, nonceKeySize)
+		if _, err = rand.Read(bts); err != nil {
+			return nil, nil, fmt.Errorf("rand read error: %w", err)
+		}
+		secKey = base64.StdEncoding.EncodeToString(bts)
+		request.Header.Set("Sec-WebSocket-Version", "13")
+		request.Header.Set("Sec-WebSocket-Key", secKey)
+	}
+
+	done := proxy.SetupContextForConn(ctx, conn)
+	defer done(&err)
+
+	err = request.Write(conn)
+	if err != nil {
+		return nil, nil, err
+	}
+	bufferedConn := peek.NewBufferedConn(conn)
+
+	response, err := http.ReadResponse(bufferedConn.Reader(), request)
+	if err != nil {
+		return nil, nil, err
+	}
+	if response.StatusCode != http.StatusSwitchingProtocols ||
+		!strings.EqualFold(response.Header.Get("Connection"), "upgrade") ||
+		!strings.EqualFold(response.Header.Get("Upgrade"), "websocket") {
+		return nil, response.Header, fmt.Errorf("unexpected status: %s", response.Status)
+	}
+
+	if v2rayHttpUpgrade {
+		return bufferedConn, response.Header, nil
+	}
+
+	if false { // we might not check this for performance
+		secAccept := response.Header.Get("Sec-Websocket-Accept")
+		const acceptSize = 28 // base64.StdEncoding.EncodedLen(sha1.Size)
+		if lenSecAccept := len(secAccept); lenSecAccept != acceptSize {
+			return nil, response.Header, fmt.Errorf("unexpected Sec-Websocket-Accept length: %d", lenSecAccept)
+		}
+		if getSecAccept(secKey) != secAccept {
+			return nil, response.Header, errors.New("unexpected Sec-Websocket-Accept")
 		}
 	}
 
-	// gobwas/ws will check server's response "Sec-Websocket-Protocol" so must add Protocols to ws.Dialer
-	// if not will cause ws.ErrHandshakeBadSubProtocol
-	if secProtocol := headers.Get("Sec-WebSocket-Protocol"); len(secProtocol) > 0 {
-		// gobwas/ws will set "Sec-Websocket-Protocol" according dialer.Protocols
-		// to avoid send repeatedly don't set it to headers
-		headers.Del("Sec-WebSocket-Protocol")
-		wsDialer.Protocols = []string{secProtocol}
-	}
-
-	// gobwas/ws send "Host" directly in Upgrade() by `httpWriteHeader(bw, headerHost, u.Host)`
-	// if headers has "Host" will send repeatedly
-	if host := headers.Get("Host"); host != "" {
-		headers.Del("Host")
-		uri.Host = host
-	}
-	wsDialer.Header = ws.HandshakeHeaderHTTP(headers)
-
-	conn, br, _, err := wsDialer.Dial(context.Background(), uri.String())
-	if err != nil {
-		return nil, headers, err
-	}
-
-	// some bytes which could be written by the peer right after response and be caught by us during buffered read,
-	// so we need warp Conn with bio.Reader
-	conn = peek.WarpConnWithBioReader(conn, br)
-
-	return NewWebsocketConn(conn, ws.StateClientSide, false), headers, nil
+	return NewWebsocketConn(conn, ws.StateClientSide, false), response.Header, nil
 }
 
 func getSecAccept(secKey string) string {

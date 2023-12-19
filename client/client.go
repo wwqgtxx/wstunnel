@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"log"
@@ -75,17 +76,18 @@ func (c *client) GetServerWSPath() string {
 }
 
 type wsClientImpl struct {
-	header    http.Header
-	wsUrl     *url.URL
-	tlsConfig *tls.Config
-	netDial   proxy.NetDialerFunc
-	ed        uint32
-	proxy     string
+	header           http.Header
+	wsUrl            *url.URL
+	tlsConfig        *tls.Config
+	dialer           proxy.ContextDialer
+	ed               uint32
+	proxy            string
+	v2rayHttpUpgrade bool
 }
 
 type tcpClientImpl struct {
 	targetAddress string
-	netDial       proxy.NetDialerFunc
+	dialer        proxy.ContextDialer
 	proxy         string
 }
 
@@ -147,25 +149,34 @@ func (c *wsClientImpl) Dial(edBuf []byte, inHeader http.Header) (common.ClientCo
 	} else {
 		// copy from c.header
 		header = c.header.Clone()
+		if header == nil {
+			header = http.Header{}
+		}
 	}
 	if c.ed > 0 && len(edBuf) > 0 {
 		header.Set("Sec-WebSocket-Protocol", utils.EncodeEd(edBuf))
 		edBuf = nil
 	}
 
-	wsConn, header, err := utils.ClientWebsocketDial(*c.wsUrl, header, c.netDial, c.tlsConfig, DialTimeout)
-	log.Println("Dial to", c.Target(), c.Proxy(), "with", header)
+	ctx, cancel := context.WithTimeout(context.Background(), DialTimeout)
+	defer cancel()
+	conn, respHeader, err := utils.ClientWebsocketDial(ctx, *c.wsUrl, header, c.dialer, c.tlsConfig, c.v2rayHttpUpgrade)
+	log.Println("Dial to", c.Target(), c.Proxy(), "with", header, "response", respHeader)
 	if err != nil {
 		return nil, err
 	}
 
 	if len(edBuf) > 0 {
-		_, err = wsConn.Write(edBuf)
+		_, err = conn.Write(edBuf)
 		if err != nil {
 			return nil, err
 		}
 	}
-	return &wsClientConn{wsConn: wsConn}, err
+	if wsConn, ok := conn.(*utils.WebsocketConn); ok {
+		return &wsClientConn{wsConn: wsConn}, err
+	} else {
+		return &tcpClientConn{tcp: conn}, err
+	}
 }
 
 type wsClientConn struct {
@@ -213,7 +224,9 @@ func (c *tcpClientImpl) Handle(tcp net.Conn) {
 }
 
 func (c *tcpClientImpl) Dial(edBuf []byte, inHeader http.Header) (common.ClientConn, error) {
-	tcp, err := c.netDial("tcp", c.Target())
+	ctx, cancel := context.WithTimeout(context.Background(), DialTimeout)
+	defer cancel()
+	tcp, err := c.dialer.DialContext(ctx, "tcp", c.Target())
 	if err == nil && len(edBuf) > 0 {
 		_, err = tcp.Write(edBuf)
 		if err != nil {
@@ -279,15 +292,12 @@ func parseProxy(proxyString string) (proxyUrl *url.URL, proxyStr string) {
 	return
 }
 
-func getNetDial(proxyUrl *url.URL) (netDial proxy.NetDialerFunc) {
-	tcpDialer := &net.Dialer{
-		Timeout: DialTimeout,
-	}
-	netDial = tcpDialer.Dial
+func getDialer(proxyUrl *url.URL) proxy.ContextDialer {
+	tcpDialer := &net.Dialer{}
 
 	proxyDialer := proxy.FromEnvironment()
 	if proxyUrl != nil {
-		dialer, err := proxy.FromURL(proxyUrl, netDial)
+		dialer, err := proxy.FromURL(proxyUrl, tcpDialer)
 		if err != nil {
 			log.Println(err)
 		} else {
@@ -295,9 +305,10 @@ func getNetDial(proxyUrl *url.URL) (netDial proxy.NetDialerFunc) {
 		}
 	}
 	if proxyDialer != proxy.Direct {
-		netDial = proxyDialer.Dial
+		return proxy.NewContextDialer(proxyDialer)
+	} else {
+		return tcpDialer
 	}
-	return
 }
 
 func NewClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
@@ -310,18 +321,18 @@ func NewClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
 
 func NewTcpClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
 	proxyUrl, proxyStr := parseProxy(clientConfig.Proxy)
-	netDial := getNetDial(proxyUrl)
+	dialer := getDialer(proxyUrl)
 
 	return &tcpClientImpl{
 		targetAddress: clientConfig.TargetAddress,
-		netDial:       netDial,
+		dialer:        dialer,
 		proxy:         proxyStr,
 	}
 }
 
 func NewWsClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
 	proxyUrl, proxyStr := parseProxy(clientConfig.Proxy)
-	netDial := getNetDial(proxyUrl)
+	netDial := getDialer(proxyUrl)
 
 	header := http.Header{}
 	if len(clientConfig.WSHeaders) != 0 {
@@ -347,12 +358,13 @@ func NewWsClientImpl(clientConfig config.ClientConfig) common.ClientImpl {
 	}
 
 	return &wsClientImpl{
-		header:    header,
-		wsUrl:     u,
-		netDial:   netDial,
-		tlsConfig: tlsConfig,
-		ed:        ed,
-		proxy:     proxyStr,
+		header:           header,
+		wsUrl:            u,
+		dialer:           netDial,
+		tlsConfig:        tlsConfig,
+		ed:               ed,
+		proxy:            proxyStr,
+		v2rayHttpUpgrade: clientConfig.V2rayHttpUpgrade,
 	}
 }
 

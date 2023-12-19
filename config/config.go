@@ -7,14 +7,15 @@ import (
 )
 
 type ClientConfig struct {
-	ListenerConfig `yaml:",inline"`
-	ProxyConfig    `yaml:",inline"`
-	TargetAddress  string            `yaml:"target-address"`
-	WSUrl          string            `yaml:"ws-url"`
-	WSHeaders      map[string]string `yaml:"ws-headers"`
-	SkipCertVerify bool              `yaml:"skip-cert-verify"`
-	ServerName     string            `yaml:"servername"`
-	ServerWSPath   string            `yaml:"server-ws-path"`
+	ListenerConfig   `yaml:",inline"`
+	ProxyConfig      `yaml:",inline"`
+	TargetAddress    string            `yaml:"target-address"`
+	WSUrl            string            `yaml:"ws-url"`
+	WSHeaders        map[string]string `yaml:"ws-headers"`
+	V2rayHttpUpgrade bool              `yaml:"v2ray-http-upgrade"`
+	SkipCertVerify   bool              `yaml:"skip-cert-verify"`
+	ServerName       string            `yaml:"servername"`
+	ServerWSPath     string            `yaml:"server-ws-path"`
 }
 
 type ServerConfig struct {

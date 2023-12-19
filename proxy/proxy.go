@@ -6,6 +6,7 @@ package proxy
 
 import (
 	"bufio"
+	"context"
 	"encoding/base64"
 	"errors"
 	"net"
@@ -16,14 +17,26 @@ import (
 
 func init() {
 	RegisterDialerType("http", func(proxyURL *url.URL, forwardDialer Dialer) (Dialer, error) {
-		return &httpProxyDialer{proxyURL: proxyURL, forwardDial: forwardDialer.Dial}, nil
+		return &httpProxyDialer{proxyURL: proxyURL, forwardDialer: NewContextDialer(forwardDialer)}, nil
 	})
 }
 
-type NetDialerFunc func(network, addr string) (net.Conn, error)
+func NewContextDialer(d Dialer) ContextDialer {
+	if xd, ok := d.(ContextDialer); ok {
+		return xd
+	}
+	return contextDialer{d}
+}
 
-func (fn NetDialerFunc) Dial(network, addr string) (net.Conn, error) {
-	return fn(network, addr)
+type contextDialer struct {
+	Dialer
+}
+
+func (d contextDialer) DialContext(ctx context.Context, network, addr string) (net.Conn, error) {
+	if ctx.Done() != nil {
+		return dialContext(ctx, d, network, addr)
+	}
+	return d.Dial(network, addr)
 }
 
 func hostPortNoPort(u *url.URL) (hostPort, hostNoPort string) {
@@ -45,15 +58,19 @@ func hostPortNoPort(u *url.URL) (hostPort, hostNoPort string) {
 }
 
 type httpProxyDialer struct {
-	proxyURL    *url.URL
-	forwardDial func(network, addr string) (net.Conn, error)
+	proxyURL      *url.URL
+	forwardDialer ContextDialer
 }
 
-func (hpd *httpProxyDialer) Dial(network string, addr string) (net.Conn, error) {
+func (hpd *httpProxyDialer) Dial(network string, addr string) (conn net.Conn, err error) {
+	return hpd.DialContext(context.Background(), network, addr)
+}
+
+func (hpd *httpProxyDialer) DialContext(ctx context.Context, network string, addr string) (conn net.Conn, err error) {
 	hostPort, _ := hostPortNoPort(hpd.proxyURL)
-	conn, err := hpd.forwardDial(network, hostPort)
+	conn, err = hpd.forwardDialer.DialContext(ctx, network, hostPort)
 	if err != nil {
-		return nil, err
+		return
 	}
 
 	connectHeader := make(http.Header)
@@ -72,9 +89,13 @@ func (hpd *httpProxyDialer) Dial(network string, addr string) (net.Conn, error) 
 		Header: connectHeader,
 	}
 
-	if err := connectReq.Write(conn); err != nil {
-		conn.Close()
-		return nil, err
+	done := SetupContextForConn(ctx, conn)
+	defer done(&err)
+
+	if err = connectReq.Write(conn); err != nil {
+		_ = conn.Close()
+		conn = nil
+		return
 	}
 
 	// Read response. It's OK to use and discard buffered reader here becaue
@@ -82,14 +103,17 @@ func (hpd *httpProxyDialer) Dial(network string, addr string) (net.Conn, error) 
 	br := bufio.NewReader(conn)
 	resp, err := http.ReadResponse(br, connectReq)
 	if err != nil {
-		conn.Close()
-		return nil, err
+		_ = conn.Close()
+		conn = nil
+		return
 	}
 
 	if resp.StatusCode != 200 {
-		conn.Close()
+		_ = conn.Close()
+		conn = nil
 		f := strings.SplitN(resp.Status, " ", 2)
-		return nil, errors.New(f[1])
+		err = errors.New(f[1])
+		return
 	}
-	return conn, nil
+	return
 }
