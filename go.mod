@@ -6,7 +6,6 @@ require (
 	github.com/gobwas/pool v0.2.1
 	github.com/gobwas/ws v1.3.1
 	github.com/gofrs/uuid/v5 v5.0.0
-	github.com/sagernet/tfo-go v0.0.0-20231209031829-7b5343ac1dc6
 	golang.org/x/crypto v0.17.0
 	golang.org/x/net v0.19.0
 	golang.org/x/sys v0.15.0

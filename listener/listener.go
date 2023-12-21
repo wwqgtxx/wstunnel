@@ -9,8 +9,6 @@ import (
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/fallback"
 	"github.com/wwqgtxx/wstunnel/peek"
-
-	"github.com/sagernet/tfo-go"
 )
 
 type Config struct {
@@ -75,7 +73,7 @@ func (l *tcpListener) loop() {
 }
 
 func ListenTcp(listenerConfig Config) (net.Listener, error) {
-	lc := tfo.ListenConfig{}
+	lc := net.ListenConfig{}
 	lc.SetMultipathTCP(true)
 	netLn, err := lc.Listen(context.Background(), "tcp", listenerConfig.BindAddress)
 	if err != nil {
