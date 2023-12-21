@@ -23,7 +23,7 @@ const (
 	PeekLength = 5
 )
 
-var NewClientImpl func(clientConfig config.ClientConfig) common.ClientImpl
+var NewClientImpl func(clientConfig config.ClientConfig) (common.ClientImpl, error)
 
 type Config struct {
 	config.FallbackConfig
@@ -154,6 +154,7 @@ func (f *Fallback) Handle(conn peek.Conn, edBuf []byte, inHeader http.Header) bo
 
 func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	var err error
+	var clientImpl common.ClientImpl
 	var sshClientImpl common.ClientImpl
 	var wsClientImpl common.ClientImpl
 	var unknownClientImpl common.ClientImpl
@@ -162,13 +163,22 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	var ss2022Tester *ss2022.Tester[common.ClientImpl]
 	var vmessTester *vmessaead.Tester[common.ClientImpl]
 	if len(fallbackConfig.SshFallbackAddress) > 0 {
-		sshClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.SshFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
+		sshClientImpl, err = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.SshFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(fallbackConfig.WSFallbackAddress) > 0 {
-		wsClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.WSFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
+		wsClientImpl, err = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.WSFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(fallbackConfig.UnknownFallbackAddress) > 0 {
-		unknownClientImpl = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.UnknownFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
+		unknownClientImpl, err = NewClientImpl(config.ClientConfig{TargetAddress: fallbackConfig.UnknownFallbackAddress, ProxyConfig: fallbackConfig.ProxyConfig})
+		if err != nil {
+			return nil, err
+		}
 	}
 	if len(fallbackConfig.TLSFallbackAddress) > 0 {
 		fallbackConfig.TLSFallback = append(fallbackConfig.TLSFallback, config.TLSFallbackConfig{
@@ -179,10 +189,22 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	if len(fallbackConfig.TLSFallback) > 0 {
 		tlsTester = tls.NewTester[common.ClientImpl]()
 		for _, tlsFallbackConfig := range fallbackConfig.TLSFallback {
-			err = tlsTester.Add(
-				tlsFallbackConfig.SNI,
-				NewClientImpl(config.ClientConfig{TargetAddress: tlsFallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig}),
-			)
+			sni := tlsFallbackConfig.SNI
+			clientImpl, err = NewClientImpl(config.ClientConfig{
+				TargetAddress: tlsFallbackConfig.Address,
+				Mtp:           tlsFallbackConfig.Mtp,
+				ProxyConfig:   fallbackConfig.ProxyConfig,
+			})
+			if err != nil {
+				return nil, err
+			}
+			if c, ok := clientImpl.(interface{ SNI() string }); ok {
+				sni = c.SNI()
+			}
+			if len(sni) == 0 && len(tlsFallbackConfig.Mtp) > 0 {
+				return nil, fmt.Errorf("not faketls mtp: %s", tlsFallbackConfig.Mtp)
+			}
+			err = tlsTester.Add(sni, clientImpl)
 			if err != nil {
 				return nil, err
 			}
@@ -191,11 +213,15 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	if len(fallbackConfig.SSFallback) > 0 {
 		ssTester = ssaead.NewTester[common.ClientImpl]()
 		for _, ssFallbackConfig := range fallbackConfig.SSFallback {
+			clientImpl, err = NewClientImpl(config.ClientConfig{TargetAddress: ssFallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig})
+			if err != nil {
+				return nil, err
+			}
 			err = ssTester.Add(
 				ssFallbackConfig.Name,
 				ssFallbackConfig.Method,
 				ssFallbackConfig.Password,
-				NewClientImpl(config.ClientConfig{TargetAddress: ssFallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig}),
+				clientImpl,
 			)
 			if err != nil {
 				return nil, err
@@ -205,11 +231,15 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	if len(fallbackConfig.SS2022Fallback) > 0 {
 		ss2022Tester = ss2022.NewTester[common.ClientImpl]()
 		for _, ss2022FallbackConfig := range fallbackConfig.SS2022Fallback {
+			clientImpl, err = NewClientImpl(config.ClientConfig{TargetAddress: ss2022FallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig})
+			if err != nil {
+				return nil, err
+			}
 			err = ss2022Tester.Add(
 				ss2022FallbackConfig.Name,
 				ss2022FallbackConfig.Method,
 				ss2022FallbackConfig.Password,
-				NewClientImpl(config.ClientConfig{TargetAddress: ss2022FallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig}),
+				clientImpl,
 			)
 			if err != nil {
 				return nil, err
@@ -219,10 +249,14 @@ func NewFallback(fallbackConfig Config) (*Fallback, error) {
 	if len(fallbackConfig.VmessFallback) > 0 {
 		vmessTester = vmessaead.NewTester[common.ClientImpl]()
 		for _, vmessFallbackConfig := range fallbackConfig.VmessFallback {
+			clientImpl, err = NewClientImpl(config.ClientConfig{TargetAddress: vmessFallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig})
+			if err != nil {
+				return nil, err
+			}
 			err = vmessTester.Add(
 				vmessFallbackConfig.Name,
 				vmessFallbackConfig.UUID,
-				NewClientImpl(config.ClientConfig{TargetAddress: vmessFallbackConfig.Address, ProxyConfig: fallbackConfig.ProxyConfig}),
+				clientImpl,
 			)
 			if err != nil {
 				return nil, err

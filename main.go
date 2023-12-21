@@ -8,12 +8,17 @@ import (
 	"syscall"
 
 	"github.com/wwqgtxx/wstunnel/client"
+	"github.com/wwqgtxx/wstunnel/client/mtproxy/tools"
 	"github.com/wwqgtxx/wstunnel/config"
 	"github.com/wwqgtxx/wstunnel/server"
 	"github.com/wwqgtxx/wstunnel/udp"
 )
 
 func main() {
+	if len(os.Args) > 2 && os.Args[1] == "generate-secret" {
+		tools.Generate(os.Args[2])
+		return
+	}
 	log.SetFlags(log.Lshortfile | log.LstdFlags)
 	configFile := "config.yaml"
 	if len(os.Args) == 2 {

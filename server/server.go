@@ -194,8 +194,13 @@ func BuildServer(serverConfig config.ServerConfig) {
 			if target.ProxyConfig != nil {
 				proxyConfig = *target.ProxyConfig
 			}
+			clientImpl, err := fallback.NewClientImpl(config.ClientConfig{TargetAddress: target.TargetAddress, ProxyConfig: proxyConfig})
+			if err != nil {
+				log.Println(err)
+				continue
+			}
 			sh = &serverHandler{
-				ClientImpl:  fallback.NewClientImpl(config.ClientConfig{TargetAddress: target.TargetAddress, ProxyConfig: proxyConfig}),
+				ClientImpl:  clientImpl,
 				DestAddress: target.TargetAddress,
 				IsInternal:  false,
 			}

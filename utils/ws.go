@@ -3,7 +3,6 @@ package utils
 import (
 	"bufio"
 	"context"
-	"crypto/rand"
 	"crypto/sha1"
 	"crypto/tls"
 	"encoding/base64"
@@ -23,6 +22,7 @@ import (
 	"github.com/gobwas/pool/pbufio"
 	"github.com/gobwas/ws"
 	"github.com/gobwas/ws/wsutil"
+	"github.com/zhangyunhao116/fastrand"
 )
 
 type WebsocketConn struct {
@@ -245,7 +245,7 @@ func ClientWebsocketDial(ctx context.Context, uri url.URL, cHeaders http.Header,
 		const nonceKeySize = 16
 		// NOTE: bts does not escape.
 		bts := make([]byte, nonceKeySize)
-		if _, err = rand.Read(bts); err != nil {
+		if _, err = fastrand.Read(bts); err != nil {
 			return nil, nil, fmt.Errorf("rand read error: %w", err)
 		}
 		secKey = base64.StdEncoding.EncodeToString(bts)

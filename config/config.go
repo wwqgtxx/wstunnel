@@ -16,6 +16,7 @@ type ClientConfig struct {
 	SkipCertVerify   bool              `yaml:"skip-cert-verify"`
 	ServerName       string            `yaml:"servername"`
 	ServerWSPath     string            `yaml:"server-ws-path"`
+	Mtp              string            `yaml:"mtp"`
 }
 
 type ServerConfig struct {
@@ -53,6 +54,7 @@ type FallbackConfig struct {
 type TLSFallbackConfig struct {
 	SNI     string `yaml:"sni"`
 	Address string `yaml:"address"`
+	Mtp     string `yaml:"mtp"`
 }
 
 type QuicFallbackConfig struct {
