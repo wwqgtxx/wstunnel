@@ -3,11 +3,10 @@ package telegram
 import (
 	"errors"
 	"fmt"
+	randv2 "math/rand/v2"
 	"net"
 
 	"github.com/wwqgtxx/wstunnel/client/mtproxy/common"
-
-	"github.com/zhangyunhao116/fastrand"
 )
 
 const (
@@ -121,7 +120,7 @@ func (b *TelegramDialer) chooseAddress(addresses map[common.DC][]string, dc, def
 	case len(addrs) == 1:
 		return addrs[0]
 	case len(addrs) > 1:
-		return addrs[fastrand.Intn(len(addrs))]
+		return addrs[randv2.IntN(len(addrs))]
 	}
 
 	return ""
