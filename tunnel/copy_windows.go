@@ -4,31 +4,13 @@ import (
 	"io"
 	"log"
 	"syscall"
-	"unsafe"
 
 	"golang.org/x/sys/windows"
 )
 
-//go:linkname modws2_32 golang.org/x/sys/windows.modws2_32
-var modws2_32 *windows.LazyDLL
+//go:generate go run golang.org/x/sys/windows/mkwinsyscall -output zsyscall_windows.go copy_windows.go
 
-var procrecv = modws2_32.NewProc("recv")
-
-//go:linkname errnoErr golang.org/x/sys/windows.errnoErr
-func errnoErr(e syscall.Errno) error
-
-func recv(s windows.Handle, buf []byte, flags int32) (n int32, err error) {
-	var _p0 *byte
-	if len(buf) > 0 {
-		_p0 = &buf[0]
-	}
-	r0, _, e1 := syscall.SyscallN(procrecv.Addr(), uintptr(s), uintptr(unsafe.Pointer(_p0)), uintptr(len(buf)), uintptr(flags))
-	n = int32(r0)
-	if n == -1 {
-		err = errnoErr(e1)
-	}
-	return
-}
+//sys recv(h windows.Handle, buf []byte, flags int32) (n int32, err error) [failretval==-1] = ws2_32.recv
 
 func syscallCopy(src io.Reader, srcRaw syscall.RawConn, dst io.Writer) (handed bool, written int64, err error) {
 	log.Printf("syscallCopy %T %T", src, dst)
