@@ -11,6 +11,7 @@ import (
 
 	"github.com/wwqgtxx/wstunnel/fallback/ssaead"
 
+	"gitlab.com/go-extension/aes-ccm"
 	"lukechampine.com/blake3"
 )
 
@@ -61,6 +62,14 @@ func NewMethod(method string, password string) (*Method, error) {
 	case "2022-blake3-aes-256-gcm":
 		m.keySaltLength = 32
 		m.constructor = aeadCipher(aes.NewCipher, cipher.NewGCM)
+		m.blockConstructor = aes.NewCipher
+	case "2022-blake3-aes-128-ccm":
+		m.keySaltLength = 16
+		m.constructor = aeadCipher(aes.NewCipher, func(cipher cipher.Block) (cipher.AEAD, error) { return ccm.NewCCM(cipher) })
+		m.blockConstructor = aes.NewCipher
+	case "2022-blake3-aes-256-ccm":
+		m.keySaltLength = 32
+		m.constructor = aeadCipher(aes.NewCipher, func(cipher cipher.Block) (cipher.AEAD, error) { return ccm.NewCCM(cipher) })
 		m.blockConstructor = aes.NewCipher
 	default:
 		return nil, fmt.Errorf("unsupported method: %s", method)
