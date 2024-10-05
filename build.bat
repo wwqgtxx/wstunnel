@@ -1,5 +1,6 @@
 cd %~dp0
 set CGO_ENABLED=0
+set GOTOOLCHAIN=local
 set GOARCH=amd64
 set GOOS=linux
 go build -o bin/wstunnel-linux-amd64
