@@ -92,6 +92,7 @@ type Config struct {
 	DisableServer bool           `yaml:"disable-server"`
 	DisableClient bool           `yaml:"disable-client"`
 	DisableUdp    bool           `yaml:"disable-udp"`
+	DisableLog    bool           `yaml:"disable-log"`
 }
 
 func ReadConfig(path string) ([]byte, error) {
@@ -118,6 +119,7 @@ func ParseConfig(buf []byte) (*Config, error) {
 		DisableServer: false,
 		DisableClient: false,
 		DisableUdp:    false,
+		DisableLog:    false,
 	}
 	if err := yaml.Unmarshal(buf, &cfg); err != nil {
 		return nil, err

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"io"
 	"log"
 	"os"
 	"os/signal"
@@ -35,6 +36,9 @@ func main() {
 	cfg, err := config.ParseConfig(buf)
 	if err != nil {
 		panic(err)
+	}
+	if cfg.DisableLog {
+		log.SetOutput(io.Discard)
 	}
 	for _, clientConfig := range cfg.ClientConfigs {
 		client.BuildClient(clientConfig)
