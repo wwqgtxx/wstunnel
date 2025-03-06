@@ -19,7 +19,7 @@ jobs:
         cache: true
     - run: go install github.com/mitchellh/gox@latest
     - run: PATH=$HOME/go/bin:$PATH ./crossbuild.sh
-    - uses: svenstaro/upload-release-action@1.1.0
+    - uses: svenstaro/upload-release-action@v2
       with:
         repo_token: ${{ secrets.GITHUB_TOKEN }}
         file: binaries/*

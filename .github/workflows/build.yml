@@ -19,7 +19,7 @@ jobs:
         cache: true
     - run: go install github.com/mitchellh/gox@latest
     - run: PATH=$HOME/go/bin:$PATH ./crossbuild.sh
-    - uses: actions/upload-artifact@v1
+    - uses: actions/upload-artifact@v4
       with:
         name: binaries
         path: binaries
